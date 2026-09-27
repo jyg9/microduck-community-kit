@@ -1,0 +1,61 @@
+# ===== 操作系统 =====
+.DS_Store
+Thumbs.db
+.directory
+*~
+
+# ===== 编辑器 / IDE =====
+.vscode/
+.idea/
+*.iml
+*.code-workspace
+.vs/
+*.suo
+*.user
+*.userprefs
+*.launch
+*.swp
+*.swo
+
+# ===== 通用构建产物 =====
+build/
+dist/
+out/
+target/
+bin/
+obj/
+Debug/
+Release/
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+*.exe
+*.elf
+*.hex
+*.bin
+*.map
+*.lst
+*.su
+*.d
+*.pdb
+
+# ===== 日志 / 临时文件 =====
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.bak
+*.bck
+
+# ===== 本地配置 / 密钥 =====
+.env
+.env.*
+!.env.example
+secrets.*
+*.pem
+*.key

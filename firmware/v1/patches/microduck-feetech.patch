@@ -1,0 +1,2538 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index e964737..ac40a0b 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1119,7 +1119,6 @@ dependencies = [
+  "duck-ipc-proto",
+  "libloading 0.8.9",
+  "ort",
+- "rustypot",
+  "serde",
+  "serde_json",
+  "serialport",
+@@ -1242,19 +1241,6 @@ dependencies = [
+  "syn 2.0.119",
+ ]
+ 
+-[[package]]
+-name = "env_logger"
+-version = "0.10.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "4cd405aab171cb85d6735e5c8d9db038c17d3ca007a4d2c25f337935c3d90580"
+-dependencies = [
+- "humantime",
+- "is-terminal",
+- "log",
+- "regex",
+- "termcolor",
+-]
+-
+ [[package]]
+ name = "equivalent"
+ version = "1.0.2"
+@@ -2344,17 +2330,6 @@ version = "2.12.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "d98f6fed1fde3f8c21bc40a1abb88dd75e67924f9cffc3ef95607bad8017f8e2"
+ 
+-[[package]]
+-name = "is-terminal"
+-version = "0.4.17"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
+-dependencies = [
+- "hermit-abi",
+- "libc",
+- "windows-sys 0.61.2",
+-]
+-
+ [[package]]
+ name = "is_terminal_polyfill"
+ version = "1.70.2"
+@@ -3024,28 +2999,6 @@ dependencies = [
+  "autocfg",
+ ]
+ 
+-[[package]]
+-name = "num_enum"
+-version = "0.7.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "5d0bca838442ec211fa11de3a8b0e0e8f3a4522575b5c4c06ed722e005036f26"
+-dependencies = [
+- "num_enum_derive",
+- "rustversion",
+-]
+-
+-[[package]]
+-name = "num_enum_derive"
+-version = "0.7.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
+-dependencies = [
+- "proc-macro-crate",
+- "proc-macro2",
+- "quote",
+- "syn 2.0.119",
+-]
+-
+ [[package]]
+ name = "num_threads"
+ version = "0.1.7"
+@@ -3691,18 +3644,6 @@ dependencies = [
+  "bitflags 2.13.1",
+ ]
+ 
+-[[package]]
+-name = "regex"
+-version = "1.13.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f020237b6c8eed93db2e2cb53c00c60a8e1bc73da7d073199a1180401450218d"
+-dependencies = [
+- "aho-corasick",
+- "memchr",
+- "regex-automata",
+- "regex-syntax",
+-]
+-
+ [[package]]
+ name = "regex-automata"
+ version = "0.4.16"
+@@ -3996,22 +3937,6 @@ version = "1.0.23"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
+ 
+-[[package]]
+-name = "rustypot"
+-version = "1.6.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "ab36a098e48013e3dcf9b5e99a5bc802159fd021452bc56bc5e492235413fc33"
+-dependencies = [
+- "clap",
+- "env_logger",
+- "log",
+- "num_enum",
+- "paste",
+- "proc-macro2",
+- "serialport",
+- "signal-hook",
+-]
+-
+ [[package]]
+ name = "ryu"
+ version = "1.0.23"
+@@ -4556,15 +4481,6 @@ dependencies = [
+  "windows-sys 0.61.2",
+ ]
+ 
+-[[package]]
+-name = "termcolor"
+-version = "1.4.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
+-dependencies = [
+- "winapi-util",
+-]
+-
+ [[package]]
+ name = "test-support"
+ version = "0.11.0"
+diff --git a/duck-control/Cargo.toml b/duck-control/Cargo.toml
+index 6e3082e..083bac3 100644
+--- a/duck-control/Cargo.toml
++++ b/duck-control/Cargo.toml
+@@ -29,14 +29,10 @@ tracing.workspace = true
+ libloading = "0.8"
+ ort = { version = "=2.0.0-rc.11", default-features = false, features = ["load-dynamic"] }
+ 
+-# 1.6.0 is a floor, not a preference: it de-stuffs protocol 2.0 status packets whose payload
+-# contains `FF FF FD`. Before it, such a read came back oversized and the fixed-size sync
+-# reads below — every one of `bus`'s — decoded garbage. A present current of -1 is enough to
+-# trigger it, so this is a correctness bound on the bus, not a version bump for its own sake.
+-rustypot = "1.6.0"
+ # `default-features = false` drops serialport's `libudev` feature, which exists only for
+ # enumerating ports (`available_ports`). We open one by path from the params file and never
+ # enumerate — and libudev-sys needs a pkg-config sysroot that the board's cross-build does
+-# not have, so leaving it on breaks the aarch64 build outright. rustypot disables it for the
+-# same reason; this crate has to as well, or cargo's feature unification turns it back on.
++# not have, so leaving it on breaks the aarch64 build outright. The bus speaks FeeTech
++# SCS/HLS framing directly (`crate::feetech`), so `serialport` is the only dependency this
++# crate has on the wire.
+ serialport = { version = "4.8", default-features = false }
+diff --git a/duck-control/src/bus.rs b/duck-control/src/bus.rs
+index 2b1aa64..0066de6 100644
+--- a/duck-control/src/bus.rs
++++ b/duck-control/src/bus.rs
+@@ -1,53 +1,92 @@
+-//! The Dynamixel bus.
++//! The FeeTech servo bus.
+ //!
+ //! One combined `sync_read` per tick covering the IMU board and all 15 servos, and one
+-//! `sync_write` of goal positions. The IMU is listed first so it answers before the servo
+-//! burst.
++//! `sync_write` of goal positions. The read is 15 bytes per device, from `PRESENT_POSITION_L`
++//! (56) to `PRESENT_CURRENT_L` (70): position, speed, load, voltage, temperature, `moving` and
++//! current in one transaction.
+ //!
+-//! Battery and thermals are the one thing that does not fit that shape: they live at registers
+-//! outside the block the tick fetches, so [`RobotIo::slow_sensors`] is a transaction of its
+-//! own, meant to be called about once a second rather than every tick.
++//! That contiguous block is a real difference from the XL330 layout, where voltage and
++//! temperature sat twenty registers past the end of the motion block and cost a transaction of
++//! their own. Here [`RobotIo::slow_sensors`] is answered from the tick's own sample, and the
++//! second transaction is gone rather than merely made cheaper.
+ //!
+-//! Written against `rustypot`, but the *numbers* — conversion factors and the EEPROM
+-//! registers asserted at startup — come from `microduck_runtime`, where they were arrived
+-//! at against real hardware. See [`crate::model`].
++//! The IMU board is listed first, but — unlike the Dynamixel devices this bus replaced — that
++//! is a *decoding* convention, not an arrival order. FeeTech nodes answer a broadcast
++//! `sync_read` whenever they get around to it, so replies are collected by id and put back
++//! into request order; see [`drain_replies`].
++//!
++//! Framing, checksums and register addresses come from [`crate::feetech`], the tested module
++//! that agrees byte for byte with the node's `fee.c` and the vendor `SCS.cpp`. The `imu_to_dxl`
++//! node has a FeeTech personality, so it answers the same read at the same address: the first
++//! 12 bytes of its telemetry map are the SFLP block, and slot 0 is decoded with [`SflpDecoder`]
++//! instead of as a servo.
+ 
+-use std::f64::consts::PI;
+-use std::time::Duration;
++use std::io::{Read, Write};
++use std::time::{Duration, Instant};
+ 
+-use rustypot::servo::dynamixel::xl330::Xl330Controller;
++use serialport::SerialPort;
+ 
++use crate::feetech::{
++    self, FrameReader, MA_PER_CURRENT_COUNT, RAD_PER_SEC_PER_SPEED_COUNT, VOLTS_PER_COUNT,
++};
+ use crate::imu::{IMU_BLOCK_LEN, SflpDecoder};
+ use crate::io::{ImuStale, IoError, JointTargets, Result, RobotIo, Sensors, SlowSensors};
+-use crate::model::{BAUD_RATE, EXPECTED_REGISTERS, IMU_DXL_ID, JOINT_IDS, NUM_JOINTS};
++use crate::model::{BAUD_RATE, EXPECTED_BAUD_CODE, IMU_DXL_ID, JOINT_IDS, NUM_JOINTS};
++
++/// Start of the contiguous block read every tick — and of the IMU node's telemetry map.
++const READ_ADDR: u8 = feetech::reg::PRESENT_POSITION_L;
++
++/// 56..70 inclusive. Fifteen bytes is the smallest read that covers position, speed, load,
++/// voltage, temperature, `moving` and current: skipping the two reserved words between
++/// temperature and `moving`, or between `moving` and current, would mean a second transaction
++/// per tick for the fields that do not fit.
++const READ_LEN: u8 = 15;
+ 
+-/// Start of the contiguous block read every tick: `present_pwm`, `present_current`,
+-/// `present_velocity`, `present_position`. Twelve bytes covers all four, and happens to be
+-/// exactly what the IMU board serves at the same address.
+-const READ_ADDR: u8 = 124;
+-const READ_LEN: u8 = 12;
++/// The same fifteen bytes, as an array length.
++const SERVO_BLOCK_LEN: usize = READ_LEN as usize;
+ 
+-/// 0.229 rev/min per count, in rad/s.
+-const RAD_PER_SEC_PER_COUNT: f64 = 0.229 * (2.0 * PI / 60.0);
++/// How long the line must stay quiet before a broadcast read is called settled.
++///
++/// One reply slot on this bus measures about 295 µs — that is the time a device occupies the
++/// wire with its status block, and it is spent even when the addressed device is absent and
++/// sends nothing. Two milliseconds is therefore roughly six reply slots of margin: comfortably
++/// past the last real reply, yet short enough that one missing servo cannot overrun the 20 ms
++/// control period the way the old 30 ms wait did.
++///
++/// It is also the serial port's own read timeout, which is what makes an empty read and "the
++/// burst is over" the same event: [`FeetechIo::pump`] cannot report silence before the line has
++/// been idle this long, so the burst loop needs no second, separate idle timer.
++const BURST_IDLE: Duration = Duration::from_millis(2);
+ 
+-/// The second, slower block: `present_input_voltage` (144, `u16`) then `present_temperature`
+-/// (146, `u8`). Three bytes covers both, so voltage and thermals cost *one* extra transaction
+-/// between them rather than two — see [`RobotIo::slow_sensors`].
++/// Budget for one *addressed* command and its acknowledgement.
+ ///
+-/// It starts eight bytes past the end of the tick's block, which is why it cannot simply be
+-/// folded into [`READ_LEN`]: the gap is `velocity_trajectory`/`position_trajectory`, twelve
+-/// bytes nothing here wants, and a servo answering a 22-byte read every tick would cost more
+-/// bus time than the two transactions do.
+-const SLOW_READ_ADDR: u8 = 144;
+-const SLOW_READ_LEN: u8 = 3;
+-
+-/// `present_input_voltage` counts 0.1 V each.
+-const VOLTS_PER_COUNT: f64 = 0.1;
+-
+-/// A healthy 16-device read completes well inside this. Capping it means a missing device
+-/// costs a bounded hiccup rather than stalling the loop on the serial driver's default.
++/// A single-device transaction has no burst to settle and a servo may legitimately take a
++/// moment to answer, so this keeps its pre-burst value even though the port's read timeout is
++/// now only [`BURST_IDLE`]. [`FeetechIo::exchange`] spends it by polling.
+ const READ_TIMEOUT: Duration = Duration::from_millis(30);
+ 
++/// FeeTech instruction `0x08`: restart the servo, reloading RAM from EEPROM.
++///
++/// The vendor's own HAL defines it (`FTServo_stm32HAL-main/SCSLib/INST.h`: `INST_REBOOT 0x08`)
++/// and sends it through the plain write path, no acknowledgement read. The address lives here
++/// rather than in [`crate::feetech::inst`] because that module is a byte-for-byte copy of the
++/// tested reference sources, which stop at `RESET` (0x0A) — and `RESET` is a factory reset that
++/// would erase the id and baud rate, not the reboot this method wants.
++const REBOOT_INST: u8 = 0x08;
++
++/// RAM `Kp` and `Kd` of the position loop, from the vendor's HLS memory table
++/// (`飞特通讯协议/HLS系列舵机内存表.html`, "磁编码HLS舵机-内存表解析", SRAM section).
++///
++/// These are the **RAM** copies (`0x32`/`0x33`); the EEPROM defaults live at 21/22 (`0x15`/`0x16`)
++/// and are only loaded into RAM at power-on. Writing the RAM register takes effect immediately and
++/// costs no flash, which is what a per-run gain change needs. The vendor table also documents
++/// `Ki` at `0x34` (52) but calls it invalid in position-servo mode, so it is deliberately not
++/// touched here. `reg` in [`crate::feetech`] stops at the registers the reference sources list and
++/// is a byte-for-byte copy of the tested module, so these two addresses live here rather than
++/// there.
++const GAIN_KP_ADDR: u8 = 50;
++const GAIN_KD_ADDR: u8 = 51;
++
+ /// Run of consecutive stale reads at which the journal says something.
+ ///
+ /// 25 reads is half a second at 50 Hz — the same span [`SflpDecoder::ready`] waits for before
+@@ -86,82 +125,472 @@ impl StaleImuTracker {
+     }
+ }
+ 
+-pub struct DynamixelIo {
+-    controller: Xl330Controller,
+-    /// IMU first, then the servos in [`JOINT_IDS`] order — the order blocks come back in.
+-    ids: Vec<u8>,
++/// The byte pipe under the framing, narrowed to the three operations the bus uses.
++///
++/// A trait rather than `Box<dyn SerialPort>` directly so a scripted fake can stand in for the
++/// port in tests: the failures worth pinning here — a servo that never answers, a burst that
++/// arrives out of order — otherwise need broken hardware on a bench. `Send` because the
++/// control loop is moved onto its own thread by `robotd`.
++trait Transport: Send {
++    fn write_all(&mut self, bytes: &[u8]) -> std::io::Result<()>;
++    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize>;
++    fn flush(&mut self) -> std::io::Result<()>;
++}
++
++/// The real port, wrapped so it satisfies [`Transport`] without a second `impl` block on
++/// someone else's type.
++struct SerialTransport(Box<dyn SerialPort>);
++
++impl Transport for SerialTransport {
++    fn write_all(&mut self, bytes: &[u8]) -> std::io::Result<()> {
++        self.0.write_all(bytes)
++    }
++
++    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
++        self.0.read(buf)
++    }
++
++    fn flush(&mut self) -> std::io::Result<()> {
++        self.0.flush()
++    }
++}
++
++/// `11, 20` — how the burst summary spells a list of ids.
++fn join_ids(ids: &[u8]) -> String {
++    ids.iter()
++        .map(u8::to_string)
++        .collect::<Vec<_>>()
++        .join(", ")
++}
++
++/// Drain every complete reply already buffered, slotting each by its id.
++///
++/// This exists rather than a `for id in ids { read_status_packet(id) }` loop because FeeTech
++/// nodes answer a broadcast `sync_read` in whatever order they finish, and nothing in the
++/// frame says which position in the request it belongs to. Matching on the ack's id is the
++/// only correct way back to request order; trusting arrival order is the bug this function
++/// makes impossible, and it is the single most important difference from the Dynamixel path.
++///
++/// `blocks` is one slot per requested id, in request order. `faults` collects `(id, status)`
++/// for a device that answered with a nonzero status: that is *its* answer, and it must not cut
++/// the burst short, or one overloaded joint would hide the state of the other fourteen. The
++/// summary error is raised once, by [`FeetechIo::sync_read_blocks`], after collection ends.
++///
++/// A malformed or unknown-id frame is skipped, not fatal: the port carries whatever the other
++/// end printed, and a missing slot at the end of the burst is what reports a genuinely silent
++/// device. A reply whose payload length disagrees with the request is still fatal, because the
++/// two ends no longer agree on the transaction and no later frame can repair that.
++fn drain_replies(
++    reader: &mut FrameReader,
++    ids: &[u8],
++    want_len: usize,
++    blocks: &mut [Option<Vec<u8>>],
++    faults: &mut Vec<(u8, u8)>,
++) -> Result<()> {
++    while let Some(frame) = reader.next_frame() {
++        let frame = match frame {
++            Ok(frame) => frame,
++            // A checksum miss means resynchronise, not "the bus is down".
++            Err(_) => continue,
++        };
++        let ack = match feetech::parse_ack(&frame) {
++            Ok(ack) => ack,
++            Err(_) => continue,
++        };
++        let Some(slot) = ids.iter().position(|want| *want == ack.id) else {
++            // A late reply from a node this transaction did not address. Dropping it is
++            // deliberate: writing it into a slot by arrival would reintroduce the ordering
++            // assumption above.
++            continue;
++        };
++        // The first frame for an id is its answer, data or fault alike; anything later is a
++        // duplicate echo and must not overwrite the slot or double-count the fault.
++        if blocks[slot].is_some() || faults.iter().any(|(fault_id, _)| *fault_id == ack.id) {
++            continue;
++        }
++        if ack.status != 0 {
++            // Recorded and skipped, never returned here: a fault is one device's news, and
++            // the burst keeps going so the other replies still reach their slots.
++            faults.push((ack.id, ack.status));
++            continue;
++        }
++        if ack.data.len() != want_len {
++            return Err(IoError::ShortRead {
++                what: "sync_read block",
++                expected: want_len,
++                got: ack.data.len(),
++            });
++        }
++        blocks[slot] = Some(ack.data);
++    }
++    Ok(())
++}
++
++/// The first [`IMU_BLOCK_LEN`] bytes of the IMU node's status block.
++///
++/// The node answers the servo status address (56) with its telemetry map, which on this board
++/// is 20 bytes long (`imu_block_bytes()` in `soft_imu_to_dxl/v1/src/imu.c`): the same 12-byte
++/// SFLP payload the old Dynamixel read consumed, followed by its diagnostic tail — raw
++/// accelerometer, a sample counter and status flags. The tick asks for the 15 bytes the servos
++/// need, so bytes 12..15 of that tail arrive along with it and are deliberately ignored.
++/// Nothing but this prefix may ever be handed to [`SflpDecoder`].
++fn imu_block_from_slot(slot: &[u8]) -> Result<[u8; IMU_BLOCK_LEN]> {
++    if slot.len() < IMU_BLOCK_LEN {
++        return Err(IoError::ShortRead {
++            what: "imu block",
++            expected: IMU_BLOCK_LEN,
++            got: slot.len(),
++        });
++    }
++    let mut raw = [0u8; IMU_BLOCK_LEN];
++    raw.copy_from_slice(&slot[..IMU_BLOCK_LEN]);
++    Ok(raw)
++}
++
++/// The fields microduck consumes from a servo's 15-byte status block.
++struct ServoReading {
++    position_rad: f64,
++    velocity_rad_s: f64,
++    current_ma: f64,
++    volts: f64,
++    temp_c: f64,
++}
++
++/// Decode bytes 56..70 of one servo's status block.
++///
++/// Reading the block contiguously is the whole point: position and speed sit at the servo's
++/// own addresses, and voltage and temperature at 62/63 come along for three extra bytes rather
++/// than a transaction of their own. Layout, low byte first:
++///
++/// ```text
++/// 56,57 present_position     i16 on the wire, but 15-bit sign-magnitude — see
++///                            feetech::position_raw_to_counts; a plain `as i16` reads the
++///                            direction bit as a large positive angle
++/// 58,59 present_speed        i16, signed, direction-carrying
++/// 60,61 present_load         i16, available but unused: `Sensors` has no load field, so
++///                            inventing one would put a number nobody consumes on the tick
++/// 62    present_voltage      u8, 0.1 V/count
++/// 63    present_temperature  u8, whole °C
++/// 64..68                     registers nothing here wants (66 is `moving`)
++/// 69,70 present_current      i16; sign dropped by the caller
++/// ```
++fn decode_servo_block(block: &[u8]) -> Result<ServoReading> {
++    if block.len() != SERVO_BLOCK_LEN {
++        return Err(IoError::ShortRead {
++            what: "motor block",
++            expected: SERVO_BLOCK_LEN,
++            got: block.len(),
++        });
++    }
++    Ok(ServoReading {
++        position_rad: feetech::position_rad(block[0], block[1]),
++        velocity_rad_s: feetech::le_i16(block[2], block[3]) as f64 * RAD_PER_SEC_PER_SPEED_COUNT,
++        volts: block[6] as f64 * VOLTS_PER_COUNT,
++        temp_c: block[7] as f64,
++        current_ma: feetech::le_i16(block[13], block[14]) as f64 * MA_PER_CURRENT_COUNT,
++    })
++}
++
++/// Turn one tick's reply blocks into [`Sensors`], plus the raw IMU block the staleness tracker
++/// counts and the voltage/temperature sample the tick now carries for free.
++///
++/// Slot 0 is the IMU node, slots 1.. are the servos in [`JOINT_IDS`] order. Free of the port
++/// and of [`FeetechIo`] so the slot rule can be tested: feeding a servo block to the SFLP
++/// decoder (or the IMU block to the servo parser) yields plausible-looking numbers, which is
++/// the worst kind of bug to discover on a robot that is already moving.
++fn assemble_tick(
++    blocks: &[Vec<u8>],
++    imu: &mut SflpDecoder,
++) -> Result<(Sensors, [u8; IMU_BLOCK_LEN], Option<SlowSensors>)> {
++    if blocks.len() != NUM_JOINTS + 1 {
++        return Err(IoError::ShortRead {
++            what: "sync_read blocks",
++            expected: NUM_JOINTS + 1,
++            got: blocks.len(),
++        });
++    }
++
++    let raw = imu_block_from_slot(&blocks[0])?;
++    let mut sensors = Sensors::default();
++    sensors.imu = imu.decode(&raw);
++
++    let mut temps_c = [0.0; NUM_JOINTS];
++    let mut volts = Vec::with_capacity(NUM_JOINTS);
++    for (joint, block) in blocks[1..].iter().enumerate() {
++        let reading = decode_servo_block(block)?;
++        sensors.positions[joint] = reading.position_rad;
++        sensors.velocities[joint] = reading.velocity_rad_s;
++        // Sign is dropped on purpose: direction is inferable from velocity, and every
++        // consumer so far wants load, not direction — see `Sensors::currents_ma`.
++        sensors.currents_ma[joint] = reading.current_ma.abs();
++        temps_c[joint] = reading.temp_c;
++        // A servo reporting 0 V is not a flat pack, it is a device that did not measure —
++        // the IMU node does exactly this. Filtering zeros here is what keeps the mean below
++        // a pack voltage instead of an average with a fake reading in it.
++        if reading.volts > 0.0 {
++            volts.push(reading.volts);
++        }
++    }
++
++    let slow = if volts.is_empty() {
++        None
++    } else {
++        Some(SlowSensors {
++            volts: volts.iter().sum::<f64>() / volts.len() as f64,
++            temps_c,
++        })
++    };
++    Ok((sensors, raw, slow))
++}
++
++pub struct FeetechIo {
++    port: Box<dyn Transport>,
++    /// Replies are reassembled here, one stream across transactions: a frame split over two
++    /// reads must survive until the rest of it arrives.
++    reader: FrameReader,
++    /// IMU first, then the servos in [`JOINT_IDS`] order — the order blocks are put *back*
++    /// into, not the order they arrive in.
++    ids: [u8; NUM_JOINTS + 1],
+     imu: SflpDecoder,
+     /// Blocks identical to their predecessor. The read succeeded but the board handed back
+     /// the same sample, which means the policy is being fed dead orientation data — a
+     /// failure that is invisible unless someone counts it. Known to happen.
+     stale_imu: StaleImuTracker,
++    /// The most recent tick's voltage and case temperatures. The tick's 15-byte read already
++    /// carries both, so [`RobotIo::slow_sensors`] answers from here instead of paying for a
++    /// transaction of its own.
++    slow: Option<SlowSensors>,
+ }
+ 
+-impl DynamixelIo {
++impl FeetechIo {
++    /// Assemble a bus around any byte pipe. The real [`Self::open`] passes the serial port;
++    /// tests pass a scripted fake.
++    fn with_transport(port: Box<dyn Transport>) -> Self {
++        let mut ids = [0u8; NUM_JOINTS + 1];
++        ids[0] = IMU_DXL_ID;
++        ids[1..].copy_from_slice(&JOINT_IDS);
++        Self {
++            port,
++            reader: FrameReader::new(),
++            ids,
++            imu: SflpDecoder::default(),
++            stale_imu: StaleImuTracker::default(),
++            slow: None,
++        }
++    }
++
+     pub fn open(port: &str) -> Result<Self> {
+         let serial = serialport::new(port, BAUD_RATE)
+-            .timeout(READ_TIMEOUT)
++            .timeout(BURST_IDLE)
+             .open()
+             .map_err(|e| IoError::Port {
+                 path: port.to_owned(),
+                 source: std::io::Error::other(e),
+             })?;
++        Ok(Self::with_transport(Box::new(SerialTransport(serial))))
++    }
+ 
+-        let controller = Xl330Controller::new()
+-            .with_protocol_v2()
+-            .with_serial_port(serial);
++    /// One read burst from the port into the frame reader.
++    ///
++    /// `false` means the port's read timeout expired with nothing to show. That timeout is
++    /// [`BURST_IDLE`] — the interval that settles a broadcast read — so an empty read is the
++    /// honest end of a burst, and waiting again would spend the whole budget twice. Addressed
++    /// transactions keep their own, longer budget in [`FeetechIo::exchange`].
++    fn pump(&mut self) -> Result<bool> {
++        let mut buf = [0u8; 256];
++        match self.port.read(&mut buf) {
++            Ok(0) => Ok(false),
++            Ok(n) => {
++                self.reader.push(&buf[..n]);
++                Ok(true)
++            }
++            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => Ok(false),
++            Err(e) => Err(IoError::Bus(format!("serial read: {e}"))),
++        }
++    }
+ 
+-        let mut ids = Vec::with_capacity(NUM_JOINTS + 1);
+-        ids.push(IMU_DXL_ID);
+-        ids.extend_from_slice(&JOINT_IDS);
++    /// The next well-formed acknowledgement in the buffered stream, if a complete one is there.
++    fn next_ack(&mut self) -> Option<feetech::Ack> {
++        while let Some(frame) = self.reader.next_frame() {
++            let frame = match frame {
++                Ok(frame) => frame,
++                Err(_) => continue,
++            };
++            if let Ok(ack) = feetech::parse_ack(&frame) {
++                return Some(ack);
++            }
++        }
++        None
++    }
+ 
+-        Ok(Self {
+-            controller,
+-            ids,
+-            imu: SflpDecoder::default(),
+-            stale_imu: StaleImuTracker::default(),
++    /// Send one addressed instruction and wait for that node's acknowledgement.
++    ///
++    /// One node at a time: every per-id instruction (torque enable, register reads and
++    /// writes) is addressed, so exactly one node answers and there is no order to recover.
++    fn exchange(&mut self, request: &[u8], id: u8) -> Result<Vec<u8>> {
++        self.port
++            .write_all(request)
++            .map_err(|e| IoError::Bus(format!("write to {id}: {e}")))?;
++        self.port
++            .flush()
++            .map_err(|e| IoError::Bus(format!("flush for {id}: {e}")))?;
++
++        // The port is configured with the burst's short idle timeout, but one addressed command
++        // is not a burst: a single device answers it, and that device may be slow. Keep polling
++        // until the pre-burst budget runs out, so tightening the burst did not quietly tighten
++        // every torque enable and register check along with it.
++        let deadline = Instant::now() + READ_TIMEOUT;
++        loop {
++            if let Some(ack) = self.next_ack() {
++                if ack.id != id {
++                    continue;
++                }
++                if ack.status != 0 {
++                    return Err(IoError::Bus(format!(
++                        "device {id} answered with status {:#04x}",
++                        ack.status
++                    )));
++                }
++                return Ok(ack.data);
++            }
++            if Instant::now() >= deadline {
++                return Err(IoError::Bus(format!("no acknowledgement from {id}")));
++            }
++            self.pump()?;
++        }
++    }
++
++    /// One broadcast `sync_read`, reassembled into request order.
++    ///
++    /// Everything the tick needs rides in this single transaction: the IMU node answers at the
++    /// same address with its telemetry map, and every servo answers with the 15 bytes from
++    /// [`READ_ADDR`]. Replies are matched by id (see [`drain_replies`]). The burst ends as soon
++    /// as every requested id has been heard from — data or fault — or the line has been idle
++    /// for [`BURST_IDLE`], whichever comes first; it never waits out the serial port's old
++    /// 30 ms.
++    ///
++    /// A missing id or a nonzero status is reported as one descriptive error at the end, after
++    /// every other reply has had its chance to arrive. That still fails the tick on purpose:
++    /// `robotd` treats a failed read as a reason to coast on its last good sample and count
++    /// `consecutive_errors`, which is the safe response. Only the stall and the mid-burst
++    /// abort are gone.
++    fn sync_read_blocks(&mut self, ids: &[u8], addr: u8, len: u8) -> Result<Vec<Vec<u8>>> {
++        let request = feetech::sync_read(ids, addr, len);
++        // Bytes already buffered predate this request, so they cannot be a reply to it.
++        // Clearing is what stops a late byte from an earlier transaction landing in whichever
++        // slot happens to share its id.
++        self.reader.clear();
++        self.port
++            .write_all(&request)
++            .map_err(|e| IoError::Bus(format!("sync_read write: {e}")))?;
++        self.port
++            .flush()
++            .map_err(|e| IoError::Bus(format!("sync_read flush: {e}")))?;
++
++        let mut blocks: Vec<Option<Vec<u8>>> = vec![None; ids.len()];
++        // A nonzero status is a per-device answer, not the end of the burst: the id and its
++        // status are kept here while the remaining replies are still collected.
++        let mut faults: Vec<(u8, u8)> = Vec::new();
++
++        loop {
++            drain_replies(&mut self.reader, ids, len as usize, &mut blocks, &mut faults)?;
++            // A fault is still an answer, so an id that faulted counts as heard from: waiting
++            // for the line to settle after it would only burn the idle margin for nothing.
++            if ids.iter().enumerate().all(|(slot, id)| {
++                blocks[slot].is_some() || faults.iter().any(|(fault_id, _)| fault_id == id)
++            }) {
++                break;
++            }
++            // Otherwise the burst ends when the line has gone idle: by the time `pump` reports
++            // `false` it has already paid [`BURST_IDLE`], so there is no second wait to add.
++            if !self.pump()? {
++                break;
++            }
++        }
++
++        // A fault or a silence still fails the tick — `robotd` coasts on its last good sample
++        // and counts `consecutive_errors`, which is the safe answer. What changed is that the
++        // failure is now reported once, at the end, after every other reply had its chance.
++        let faulted: Vec<u8> = faults.iter().map(|(id, _)| *id).collect();
++        // A device that answered with a fault is heard from, just not healthy; it must not be
++        // reported as missing too, or the error would name the same id twice.
++        let missing: Vec<u8> = ids
++            .iter()
++            .enumerate()
++            .filter(|(slot, id)| blocks[*slot].is_none() && !faulted.contains(id))
++            .map(|(_, id)| *id)
++            .collect();
++
++        if !faults.is_empty() || !missing.is_empty() {
++            let mut parts = Vec::new();
++            // Group by status, so several devices sharing one error bit produce one clause
++            // instead of a stutter of near-identical ones.
++            let mut statuses: Vec<(u8, Vec<u8>)> = Vec::new();
++            for &(id, status) in &faults {
++                match statuses.iter_mut().find(|(seen, _)| *seen == status) {
++                    Some((_, group)) => group.push(id),
++                    None => statuses.push((status, vec![id])),
++                }
++            }
++            for (status, group) in statuses {
++                parts.push(format!("id(s) {} faulted status {status:#04x}", join_ids(&group)));
++            }
++            if !missing.is_empty() {
++                parts.push(format!("id(s) {} missing", join_ids(&missing)));
++            }
++            return Err(IoError::Bus(format!("sync_read: {}", parts.join("; "))));
++        }
++        Ok(blocks.into_iter().map(Option::unwrap).collect())
++    }
++
++    fn read_register(&mut self, id: u8, addr: u8) -> Result<u8> {
++        let request = feetech::read(id, addr, 1);
++        let data = self.exchange(&request, id)?;
++        data.first().copied().ok_or(IoError::ShortRead {
++            what: "register read",
++            expected: 1,
++            got: 0,
+         })
+     }
+ 
++    fn write_register(&mut self, id: u8, addr: u8, value: u8) -> Result<()> {
++        let request = feetech::write(id, addr, &[value]);
++        self.exchange(&request, id).map(|_| ())
++    }
++
+     /// Assert — and correct — the EEPROM registers the control loop depends on.
+     ///
+-    /// Returns how many needed fixing. A servo that has been factory-reset or swapped in
+-    /// arrives with `return_delay_time = 250`, which alone would eat 40% of the tick
+-    /// budget across the bus. Checking costs one read per register at startup and removes
+-    /// a whole class of "why is it slow on this robot".
++    /// Returns how many needed fixing. Two registers are checked, and both are ones a
++    /// factory-reset or swapped-in servo can get wrong: the id and the baud code. The XL330
++    /// also needed `return_delay_time` pinned, but that reasoning does not carry over — the
++    /// FeeTech bus acknowledges every instruction, so there is no per-device turnaround budget
++    /// and nothing to defend. `pwm_slope` and `shutdown` have no address known for the
++    /// HD-1910-C001, and writing a guessed register on a real robot is worse than not writing
++    /// it at all, so they are not asserted. See the companion note's open items.
++    ///
++    /// A factory-reset servo is still a real hazard even with a short list: it can come back
++    /// on a different baud code, which makes it invisible to every later transaction, so the
++    /// check is what removes a whole class of "why is one leg dead on this robot".
+     pub fn check_registers(&mut self) -> Result<usize> {
+         let mut fixed = 0;
+         for &id in &JOINT_IDS {
+-            for &(name, want) in EXPECTED_REGISTERS {
+-                // rustypot returns a Vec even for a single-id read. An empty one means the
+-                // servo did not answer, which must not be read as "register is fine".
+-                let raw = match name {
+-                    "return_delay_time" => self.controller.read_return_delay_time(id),
+-                    "baud_rate" => self.controller.read_baud_rate(id),
+-                    "pwm_slope" => self.controller.read_pwm_slope(id),
+-                    "shutdown" => self.controller.read_shutdown(id),
+-                    other => unreachable!("unhandled register {other}"),
+-                }
+-                .map_err(|e| IoError::Bus(format!("read {name} on {id}: {e}")))?;
+-
+-                let got = *raw.first().ok_or(IoError::ShortRead {
+-                    what: "register read",
+-                    expected: 1,
+-                    got: 0,
+-                })?;
++            let got = self.read_register(id, feetech::reg::ID)?;
++            if got != id {
++                tracing::warn!(id, got, "correcting servo id");
++                self.write_register(id, feetech::reg::ID, id)?;
++                fixed += 1;
++            }
+ 
+-                if got == want {
+-                    continue;
+-                }
+-                tracing::warn!(id, register = name, got, want, "correcting motor register");
+-                match name {
+-                    "return_delay_time" => self.controller.write_return_delay_time(id, want),
+-                    "baud_rate" => self.controller.write_baud_rate(id, want),
+-                    "pwm_slope" => self.controller.write_pwm_slope(id, want),
+-                    "shutdown" => self.controller.write_shutdown(id, want),
+-                    other => unreachable!("unhandled register {other}"),
+-                }
+-                .map_err(|e| IoError::Bus(format!("write {name} on {id}: {e}")))?;
++            let got = self.read_register(id, feetech::reg::BAUD_RATE)?;
++            if got != EXPECTED_BAUD_CODE {
++                tracing::warn!(
++                    id,
++                    register = "baud_rate",
++                    got,
++                    want = EXPECTED_BAUD_CODE,
++                    "correcting motor register"
++                );
++                self.write_register(id, feetech::reg::BAUD_RATE, EXPECTED_BAUD_CODE)?;
+                 fixed += 1;
+             }
+         }
+@@ -170,39 +599,43 @@ impl DynamixelIo {
+ 
+     /// Present positions only — a lighter read than [`RobotIo::read`], used once at startup
+     /// to adopt the pose the robot is already in.
++    ///
++    /// Two bytes per servo rather than the tick's fifteen: this runs once, so speed, load,
++    /// voltage and current are dead weight, and a shorter reply is also a shorter burst on a
++    /// wire shared with fifteen other devices.
+     pub fn present_positions(&mut self) -> Result<[f64; NUM_JOINTS]> {
+-        let values = self
+-            .controller
+-            .sync_read_present_position(&JOINT_IDS)
+-            .map_err(|e| IoError::Bus(format!("read present positions: {e}")))?;
+-        if values.len() != NUM_JOINTS {
+-            return Err(IoError::ShortRead {
+-                what: "present positions",
+-                expected: NUM_JOINTS,
+-                got: values.len(),
+-            });
+-        }
++        let blocks = self.sync_read_blocks(&JOINT_IDS, feetech::reg::PRESENT_POSITION_L, 2)?;
+         let mut out = [0.0; NUM_JOINTS];
+-        out.copy_from_slice(&values);
++        for (joint, block) in blocks.iter().enumerate() {
++            out[joint] = feetech::position_rad(block[0], block[1]);
++        }
+         Ok(out)
+     }
+ 
+     /// Torque on every servo.
+     ///
+-    /// One transaction per joint, so this is not something to call per tick — the control loop calls
+-    /// it once, when someone enables the policy on a limp robot. See [`RobotIo::set_torque`] for what
+-    /// has *not* changed: nothing touches torque because a process started.
++    /// One transaction per joint, so this is not something to call per tick — the control loop
++    /// calls it once, when someone enables the policy on a limp robot. See
++    /// [`RobotIo::set_torque`] for what has *not* changed: nothing touches torque because a
++    /// process started.
+     ///
+-    /// **Every servo is written, whatever the others said.** Fourteen acknowledged transactions
++    /// **Every servo is written, whatever the others said.** Fifteen acknowledged transactions
+     /// in a row, and one dropped ack used to end the loop there — which for `on = false` on the
+     /// way to a power-off meant a robot that sat down and switched off with half its legs still
+     /// locked, because the tick that saw the error was the last one that could have retried.
+     /// Writing the rest costs the same as it would have, and the error names every joint that
+     /// did not answer so the caller can decide whether to ask again.
++    ///
++    /// The FeeTech bus acknowledges every instruction, so this shape is unchanged from the
++    /// Dynamixel one. What is gone is the reason `return_delay_time` dominated the old tick
++    /// budget: turnaround is no longer a per-device delay the host has to police, so torque
++    /// bring-up is bounded by the 30 ms read timeout, not by sixteen configured delays.
+     pub fn set_torque(&mut self, on: bool) -> Result<()> {
++        let value = [u8::from(on)];
+         let mut failed = Vec::new();
+         for &id in &JOINT_IDS {
+-            if let Err(e) = self.controller.write_torque_enable(id, on) {
++            let request = feetech::write(id, feetech::reg::TORQUE_ENABLE, &value);
++            if let Err(e) = self.exchange(&request, id) {
+                 failed.push(format!("torque {on} on {id}: {e}"));
+             }
+         }
+@@ -241,165 +674,176 @@ impl DynamixelIo {
+     }
+ }
+ 
+-impl RobotIo for DynamixelIo {
++impl RobotIo for FeetechIo {
+     fn read(&mut self) -> Result<Sensors> {
+-        let blocks = self
+-            .controller
+-            .sync_read_raw_data(&self.ids, READ_ADDR, READ_LEN)
+-            .map_err(|e| IoError::Bus(format!("combined imu+motor sync_read: {e}")))?;
+-
+-        if blocks.len() != self.ids.len() {
+-            return Err(IoError::ShortRead {
+-                what: "sync_read blocks",
+-                expected: self.ids.len(),
+-                got: blocks.len(),
+-            });
+-        }
++        let ids = self.ids;
++        let blocks = self.sync_read_blocks(&ids, READ_ADDR, READ_LEN)?;
+ 
+-        let mut sensors = Sensors::default();
++        let (sensors, raw, slow) = assemble_tick(&blocks, &mut self.imu)?;
++        self.slow = slow;
+ 
+-        // Slot 0 is the IMU board.
+-        if blocks[0].len() == IMU_BLOCK_LEN {
+-            let mut raw = [0u8; IMU_BLOCK_LEN];
+-            raw.copy_from_slice(&blocks[0]);
+-            // Say so, or the counters are numbers nobody ever reads — but only once the run
+-            // is long enough to mean something. Rate-limited past that because a board which
+-            // has stopped refreshing produces one of these every single tick, and 50 Hz of
+-            // identical warnings would evict the journal.
+-            let run = self.stale_imu.observe(&raw);
+-            if run == STALE_RUN_WARN || (run > STALE_RUN_WARN && run.is_multiple_of(500)) {
+-                tracing::warn!(
+-                    consecutive = run,
+-                    total = self.stale_imu.stale.total,
+-                    "imu board has returned the same sample {run} reads running — orientation is frozen"
+-                );
+-            }
+-            sensors.imu = self.imu.decode(&raw);
+-        } else {
+-            return Err(IoError::ShortRead {
+-                what: "imu block",
+-                expected: IMU_BLOCK_LEN,
+-                got: blocks[0].len(),
+-            });
+-        }
+-
+-        for (joint, block) in blocks[1..].iter().enumerate() {
+-            if block.len() != READ_LEN as usize {
+-                return Err(IoError::ShortRead {
+-                    what: "motor block",
+-                    expected: READ_LEN as usize,
+-                    got: block.len(),
+-                });
+-            }
+-            // [0..2] present_pwm, unused · [2..4] current · [4..8] velocity · [8..12] position
+-            sensors.currents_ma[joint] = (i16::from_le_bytes([block[2], block[3]]) as f64).abs();
+-            let velocity = i32::from_le_bytes([block[4], block[5], block[6], block[7]]);
+-            sensors.velocities[joint] = velocity as f64 * RAD_PER_SEC_PER_COUNT;
+-            let position = i32::from_le_bytes([block[8], block[9], block[10], block[11]]);
+-            sensors.positions[joint] = (2.0 * PI * position as f64 / 4096.0) - PI;
++        // Say so, or the counters are numbers nobody ever reads — but only once the run is
++        // long enough to mean something. Rate-limited past that because a board which has
++        // stopped refreshing produces one of these every single tick, and 50 Hz of identical
++        // warnings would evict the journal.
++        let run = self.stale_imu.observe(&raw);
++        if run == STALE_RUN_WARN || (run > STALE_RUN_WARN && run.is_multiple_of(500)) {
++            tracing::warn!(
++                consecutive = run,
++                total = self.stale_imu.stale.total,
++                "imu board has returned the same sample {run} reads running — orientation is frozen"
++            );
+         }
+ 
+         Ok(sensors)
+     }
+ 
+     fn write(&mut self, targets: &JointTargets) -> Result<()> {
+-        self.controller
+-            .sync_write_goal_position(&JOINT_IDS, &targets.positions)
+-            .map_err(|e| IoError::Bus(format!("sync_write goal positions: {e}")))
++        // Sign-magnitude, never a two's-complement cast: `position_from_rad` sets the
++        // direction bit the servo expects, where casting a negative count through `i16`
++        // would hand a negative angle over as a large positive one.
++        let payloads: Vec<[u8; 2]> = targets
++            .positions
++            .iter()
++            .map(|rad| feetech::position_from_rad(*rad))
++            .collect();
++        let refs: Vec<&[u8]> = payloads.iter().map(|bytes| bytes.as_slice()).collect();
++        let frame = feetech::sync_write(&JOINT_IDS, feetech::reg::GOAL_POSITION_L, &refs)
++            .map_err(|e| IoError::Bus(format!("sync_write goal positions: {e}")))?;
++
++        // Broadcast, and therefore unacknowledged by design: a SYNC_WRITE addressed to 0xFE
++        // gets no status packet from anyone. There is nothing to wait for; a servo that
++        // missed the write shows up on the next tick's read instead.
++        self.port
++            .write_all(&frame)
++            .map_err(|e| IoError::Bus(format!("sync_write goal positions: {e}")))?;
++        self.port
++            .flush()
++            .map_err(|e| IoError::Bus(format!("sync_write goal positions: {e}")))?;
++        Ok(())
+     }
+ 
+     fn set_torque(&mut self, on: bool) -> Result<()> {
+         // The inherent method, which predates the trait and is still what `robotd init` uses.
+-        DynamixelIo::set_torque(self, on)
++        FeetechIo::set_torque(self, on)
+     }
+ 
++    /// Reboot one servo — FeeTech instruction `0x08`, which reloads RAM from EEPROM.
++    ///
++    /// The way out of a latched hardware error — overload, overheating, electrical shock — which
++    /// otherwise holds torque off until the battery is pulled. On the Dynamixel bus this was
++    /// protocol 2's REBOOT; on the HD-1910-C001 it is instruction `0x08`, which the vendor HAL
++    /// defines as `INST_REBOOT` and sends with no parameters. It is deliberately *not*
++    /// [`feetech::inst::RESET`] (`0x0A`): that is a factory reset and would erase the id, the
++    /// baud rate and the angle limits of a servo bolted into a robot.
++    ///
++    /// **Measured on hardware** (HD-1910-C001, firmware 3.46, 1 Mbps, 2026-09-24): `0x08` with
++    /// no parameters and a unicast id exists and reboots the servo, which answers *nothing* — the
++    /// request times out by design. It is alive again after **823 ms** (PING polled every 20 ms;
++    /// the vendor manual says ~800 ms), with id, baud code, running mode, torque state, lock,
++    /// EEPROM P/D (21/22) and OFS unchanged — but with **RAM reloaded from EEPROM**, so the RAM
++    /// position gains (50/51) come back as the EEPROM values. That is the contract
++    /// [`RobotIo::reboot`] documents: the servo comes back with torque off and its RAM registers
++    /// at their EEPROM defaults, and the caller rewrites the gains.
++    ///
++    /// Torque goes off first (address 40), as the vendor manual asks, and as `robotd` already
++    /// does around [`crate::safety::Safety::reboot_motors`]. That write is addressed and
++    /// acknowledged, so a servo that is already gone is reported instead of silently skipped.
++    ///
++    /// **No acknowledgement is awaited for the reboot itself.** There is none, and waiting would
++    /// burn the port timeout once per servo and stall the control loop, which calls this inside
++    /// the tick. The frame simply goes on the wire and this returns; it does not sleep and it does
++    /// not ping. The ~0.8 s off-bus window is the caller's to ride out — the tick's reads fail and
++    /// the loop coasts, then the gain cache is already forgotten so the next `apply` rewrites the
++    /// gains.
+     fn reboot(&mut self, id: u8) -> Result<()> {
+-        // The status packet is a courtesy the servo may not manage before it resets, so only a
+-        // failure to send is an error here.
+-        self.controller
+-            .reboot(id)
+-            .map(|_| ())
+-            .map_err(|e| IoError::Bus(format!("reboot {id}: {e}")))
+-    }
++        self.write_register(id, feetech::reg::TORQUE_ENABLE, 0)?;
+ 
+-    fn set_gain(&mut self, kp: u16) -> Result<()> {
+-        // I and D are written too, at zero — the prototype's `--ki`/`--kd` defaults, which
+-        // its startup writes to every motor. These are RAM registers, so every power-up
+-        // restores the servo's factory values, and the factory D gain is not zero: left in
+-        // place it damps the servo's internal PID, and the robot runs measurably softer
+-        // than the prototype at the *same* kP. That is not a tuning choice anyone made, so
+-        // it is pinned here rather than exposed as a knob.
+-        const KI: u16 = 0;
+-        const KD: u16 = 0;
+-        for &id in &JOINT_IDS {
+-            self.controller
+-                .write_position_p_gain(id, kp)
+-                .map_err(|e| IoError::Bus(format!("position_p_gain {kp} on {id}: {e}")))?;
+-            self.controller
+-                .write_position_i_gain(id, KI)
+-                .map_err(|e| IoError::Bus(format!("position_i_gain {KI} on {id}: {e}")))?;
+-            self.controller
+-                .write_position_d_gain(id, KD)
+-                .map_err(|e| IoError::Bus(format!("position_d_gain {KD} on {id}: {e}")))?;
+-        }
++        let frame = feetech::instruction_no_addr(id, REBOOT_INST);
++        self.port
++            .write_all(&frame)
++            .map_err(|e| IoError::Bus(format!("reboot {id}: {e}")))?;
++        // The vendor's `Reboot()` flushes and returns without reading: nothing comes back.
++        self.port
++            .flush()
++            .map_err(|e| IoError::Bus(format!("reboot {id}: {e}")))?;
+         Ok(())
+     }
+ 
+-    /// Supply voltage and case temperatures, in one `sync_read` over registers 144–146.
++    /// Set the position P gain on every joint, from the HLS memory table.
+     ///
+-    /// Voltage is averaged because all 15 servos sit on one pack: a single reading is the
+-    /// same measurement with more noise. Temperature is *not* averaged here — the caller gets
+-    /// every joint, because one loaded joint running hot is the case worth seeing and a mean
+-    /// over fifteen hides it.
++    /// Writes RAM address 50 (`Kp`, `0x32`) once per joint with a single byte, clamped to the
++    /// vendor's documented range `0..254`. The value microduck's `kp` carries is passed through
++    /// unchanged — no conversion is applied here — while the register's own scale is documented
++    /// as **1/8** (and `Kd`'s as 1/4), so the gain the servo actually applies is `kp / 8`. The
++    /// table gives address 50 as "位置伺服模式：控制电机位置环的比例系数(1/8)".
+     ///
+-    /// Note that a silent servo does not produce a short answer: `rustypot`'s `sync_read`
+-    /// waits for every id and fails the whole transaction if one does not reply. So this is
+-    /// all-or-nothing, and the caller is expected to keep its previous sample rather than
+-    /// treat one miss as news. The zero filter on voltage guards a device that answers with a
+-    /// nonsense value, which must not be averaged in as if the pack were half flat.
+-    fn slow_sensors(&mut self) -> Result<SlowSensors> {
+-        let blocks = self
+-            .controller
+-            .sync_read_raw_data(&JOINT_IDS, SLOW_READ_ADDR, SLOW_READ_LEN)
+-            .map_err(|e| IoError::Bus(format!("voltage+temperature sync_read: {e}")))?;
+-
+-        if blocks.len() != NUM_JOINTS {
+-            return Err(IoError::ShortRead {
+-                what: "voltage+temperature blocks",
+-                expected: NUM_JOINTS,
+-                got: blocks.len(),
+-            });
+-        }
+-
+-        let mut temps_c = [0.0; NUM_JOINTS];
+-        let mut volts = Vec::with_capacity(NUM_JOINTS);
+-        for (joint, block) in blocks.iter().enumerate() {
+-            if block.len() != SLOW_READ_LEN as usize {
+-                return Err(IoError::ShortRead {
+-                    what: "voltage+temperature block",
+-                    expected: SLOW_READ_LEN as usize,
+-                    got: block.len(),
+-                });
++    /// `Kd` (RAM address 51, `0x33`) is written to 0 alongside it. The factory D value is *not*
++    /// zero, and leaving it in place would let the servo's own position loop damp every motion at
++    /// whatever `kp` this sets — the same reason the Dynamixel path zeroed the D gain. The vendor
++    /// documents `Kd` as "位置伺服模式：控制电机位置环的微分系数(1/4)".
++    ///
++    /// `Ki` (RAM address 52, `0x34`) is deliberately **not** written, not even as 0 for symmetry:
++    /// the vendor table says it is 无效 in position-servo mode (it belongs to the constant-speed
++    /// loop), so touching it would be a write with no defined meaning.
++    ///
++    /// The EEPROM copies at 21/22 (`0x15`/`0x16`) are not written either. Those are merely the
++    /// power-on defaults loaded into RAM; the RAM value takes effect immediately, and writing the
++    /// EEPROM copy on every start would burn flash for nothing. Consequently no unlock handling is
++    /// needed: address 55 (`锁标志`) only governs whether EEPROM writes persist, and no EEPROM
++    /// address is written here.
++    ///
++    /// **Open item:** the scale means `deploy/robotd.toml`'s `gain = 200` sits at the very top of
++    /// the 0..254 range (`gain_limp = 50` is a quarter of it), and those numbers were tuned for
++    /// the XL330's 0..16383 scale. They must be re-tuned on hardware; this function cannot know
++    /// the right value. See the companion note's open items.
++    ///
++    /// **Every joint is written, whatever the others said**, matching [`FeetechIo::set_torque`]:
++    /// one silent servo must not leave the rest of the robot on a stale gain.
++    fn set_gain(&mut self, kp: u16) -> Result<()> {
++        let value = [kp.min(254) as u8];
++        let kd = [0u8];
++        let mut failed = Vec::new();
++        for &id in &JOINT_IDS {
++            let request = feetech::write(id, GAIN_KP_ADDR, &value);
++            if let Err(e) = self.exchange(&request, id) {
++                failed.push(format!("Kp {kp} on {id}: {e}"));
+             }
+-            // [0..2] present_input_voltage · [2] present_temperature, already in whole °C.
+-            let counts = u16::from_le_bytes([block[0], block[1]]);
+-            let v = counts as f64 * VOLTS_PER_COUNT;
+-            if v > 0.0 {
+-                volts.push(v);
++            let request = feetech::write(id, GAIN_KD_ADDR, &kd);
++            if let Err(e) = self.exchange(&request, id) {
++                failed.push(format!("Kd 0 on {id}: {e}"));
+             }
+-            temps_c[joint] = block[2] as f64;
+         }
+-
+-        if volts.is_empty() {
+-            return Err(IoError::ShortRead {
+-                what: "input voltage",
+-                expected: NUM_JOINTS,
+-                got: 0,
+-            });
++        if failed.is_empty() {
++            Ok(())
++        } else {
++            Err(IoError::Bus(failed.join("; ")))
+         }
+-        Ok(SlowSensors {
+-            volts: volts.iter().sum::<f64>() / volts.len() as f64,
+-            temps_c,
++    }
++
++    /// Supply voltage and case temperatures, from the tick's own sample.
++    ///
++    /// These used to live 20 registers past the end of the motion block and cost a second
++    /// transaction. With the HLS layout they sit inside the block the tick already reads
++    /// (voltage at 62, temperature at 63), so folding them in removes a transaction rather
++    /// than making one cheaper — and the sample is at most one tick old, which for a pack
++    /// voltage and a case temperature is no age at all.
++    ///
++    /// Voltage is averaged because all 15 servos sit on one pack: a single reading is the same
++    /// measurement with more noise. Temperature is *not* averaged here — the caller gets every
++    /// joint, because one loaded joint running hot is the case worth seeing and a mean over
++    /// fifteen hides it. Zero-voltage readings are filtered out where the mean is built, in
++    /// `assemble_tick`, so a device that did not measure cannot halve the reported pack.
++    ///
++    /// The previous sample is kept across a failed tick on purpose: this is all-or-nothing per
++    /// tick, and the caller is expected to hold its last good number rather than treat one miss
++    /// as a flat pack. Before the first successful tick there is nothing to hold, and the error
++    /// says so.
++    fn slow_sensors(&mut self) -> Result<SlowSensors> {
++        self.slow.ok_or(IoError::ShortRead {
++            what: "input voltage",
++            expected: NUM_JOINTS,
++            got: 0,
+         })
+     }
+ 
+@@ -414,38 +858,571 @@ impl RobotIo for DynamixelIo {
+ 
+ #[cfg(test)]
+ mod tests {
++    use std::sync::{Arc, Mutex};
++
+     use super::*;
++    use crate::feetech::RAD_PER_COUNT;
+ 
+     /// The block parsed per servo must cover current, velocity and position without
+     /// overrunning. If `READ_LEN` and the offsets below ever disagree, joints get each
+     /// other's values — which reads as a wiring fault, not a code bug.
+     #[test]
+     fn read_block_is_long_enough_for_every_field() {
+-        assert_eq!(READ_LEN as usize, IMU_BLOCK_LEN);
+-        // Highest offset touched by the parser below is position at 8..12.
+-        const { assert!(READ_LEN >= 12) };
++        assert_eq!(SERVO_BLOCK_LEN, 15);
++        // The deepest field the servo decoder reads is present_current at 69/70, i.e. block
++        // offsets 13/14. The IMU prefix needs the first twelve bytes of the same block.
++        const {
++            assert!(
++                SERVO_BLOCK_LEN
++                    > (feetech::reg::PRESENT_CURRENT_L - feetech::reg::PRESENT_POSITION_L) as usize
++            )
++        };
++        const { assert!(SERVO_BLOCK_LEN >= IMU_BLOCK_LEN) };
+     }
+ 
+-    /// The conversion must agree with rustypot's own `AnglePosition`, which is what
+-    /// `sync_write_goal_position` uses on the way out. A mismatch would mean the loop
+-    /// commands a different angle than it believes it read back.
++    /// The position conversion must round-trip through the servo's own encoding, which is
++    /// 15-bit sign-magnitude rather than a two's-complement count. A mismatch would mean the
++    /// loop commands a different angle than it believes it read back — and the direction bit
++    /// makes that a two-sided error, not an offset.
+     #[test]
+-    fn position_conversion_round_trips_through_rustypot() {
+-        for raw in [0i32, 1024, 2048, 3072, 4095] {
+-            let ours = (2.0 * PI * raw as f64 / 4096.0) - PI;
+-            let theirs = (4096.0 * (PI + ours) / (2.0 * PI)) as i32;
+-            assert_eq!(theirs, raw, "raw {raw} did not survive the round trip");
++    fn position_round_trips_through_the_feetech_conversion() {
++        for rad in [-3.0, -1.0, 0.0, 0.5, 3.0] {
++            let [low, high] = feetech::position_from_rad(rad);
++            let back = feetech::position_rad(low, high);
++            assert!((back - rad).abs() < feetech::RAD_PER_COUNT, "{rad} -> {back}");
++            // The bytes really are sign-magnitude on the wire, not a negative i16.
++            let raw = feetech::le_u16(low, high);
++            let via_counts = feetech::position_raw_to_counts(raw) as f64 * RAD_PER_COUNT;
++            assert!((via_counts - back).abs() < 1e-12);
+         }
+     }
+ 
+-    /// 0.229 rev/min per count. Getting this wrong scales every joint velocity in the
+-    /// observation vector by a constant, which a policy tolerates just well enough to walk
+-    /// badly.
++    /// 0.732 rpm per count, the figure the FeeTech reference sources use (60 counts is
++    /// 43.92 rpm). Getting this wrong scales every joint velocity in the observation vector by
++    /// a constant, which a policy tolerates just well enough to walk badly.
+     #[test]
+     fn velocity_scale_matches_the_datasheet_figure() {
+-        let one_count = RAD_PER_SEC_PER_COUNT;
+-        let expected_rpm = 0.229;
+-        assert!((one_count * 60.0 / (2.0 * PI) - expected_rpm).abs() < 1e-12);
++        let one_count = RAD_PER_SEC_PER_SPEED_COUNT;
++        let expected_rpm = 0.732;
++        assert!((one_count * 60.0 / std::f64::consts::TAU - expected_rpm).abs() < 1e-12);
++    }
++
++    /// One healthy ack frame as a node would build it: `FF FF id LEN status data ~SUM`.
++    fn ack(id: u8, data: &[u8]) -> Vec<u8> {
++        ack_status(id, 0x00, data)
++    }
++
++    /// One ack frame with an explicit status byte — what a device reporting a fault sends.
++    fn ack_status(id: u8, status: u8, data: &[u8]) -> Vec<u8> {
++        let len = (data.len() + 2) as u8;
++        let mut frame = vec![0xFF, 0xFF, id, len, status];
++        frame.extend_from_slice(data);
++        let sum = !frame[2..].iter().fold(0u8, |acc, b| acc.wrapping_add(*b));
++        frame.push(sum);
++        frame
++    }
++
++    /// One servo's 15-byte status block, field by field.
++    fn servo_block(
++        position_raw: u16,
++        speed: i16,
++        load: i16,
++        volts: u8,
++        temp: u8,
++        current: i16,
++    ) -> [u8; SERVO_BLOCK_LEN] {
++        let mut block = [0u8; SERVO_BLOCK_LEN];
++        block[0..2].copy_from_slice(&position_raw.to_le_bytes());
++        block[2..4].copy_from_slice(&speed.to_le_bytes());
++        block[4..6].copy_from_slice(&load.to_le_bytes());
++        block[6] = volts;
++        block[7] = temp;
++        block[13..15].copy_from_slice(&current.to_le_bytes());
++        block
++    }
++
++    /// The central reason this rewrite is not a search-and-replace: FeeTech nodes answer a
++    /// broadcast read in whatever order they finish. A `for id in ids` read loop — which was
++    /// correct for the in-order Dynamixel devices — would hand joint 21's sample to joint 20.
++    #[test]
++    fn out_of_order_sync_read_replies_are_reassembled_in_request_order() {
++        let ids = [20u8, 21];
++        let first = servo_block(0x0100, 10, 0, 80, 30, 100);
++        let second = servo_block(0x0200, 20, 0, 81, 31, 200);
++
++        // The second servo answers first: legal on this bus, and fatal to arrival-order code.
++        let mut stream = ack(21, &second);
++        stream.extend_from_slice(&ack(20, &first));
++
++        let mut reader = FrameReader::new();
++        reader.push(&stream);
++        let mut blocks: Vec<Option<Vec<u8>>> = vec![None; ids.len()];
++        let mut faults = Vec::new();
++        drain_replies(
++            &mut reader,
++            &ids,
++            SERVO_BLOCK_LEN,
++            &mut blocks,
++            &mut faults,
++        )
++        .unwrap();
++        assert!(faults.is_empty());
++
++        assert_eq!(
++            blocks[0].as_deref(),
++            Some(&first[..]),
++            "slot 0 must hold id 20's reply"
++        );
++        assert_eq!(
++            blocks[1].as_deref(),
++            Some(&second[..]),
++            "slot 1 must hold id 21's reply"
++        );
++    }
++
++    /// A byte pipe scripted with the exact bytes a burst would carry, and honest about silence:
++    /// an empty read blocks for [`BURST_IDLE`] and then reports a timeout, the way the real
++    /// serial port is configured. A fake that returned instantly would make the timing
++    /// assertion in the missing-device test below say nothing at all.
++    struct BurstTransport {
++        replies: Vec<u8>,
++    }
++
++    impl BurstTransport {
++        fn new(replies: Vec<u8>) -> Self {
++            Self { replies }
++        }
++    }
++
++    impl Transport for BurstTransport {
++        fn write_all(&mut self, _bytes: &[u8]) -> std::io::Result<()> {
++            Ok(())
++        }
++
++        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
++            if self.replies.is_empty() {
++                std::thread::sleep(BURST_IDLE);
++                return Err(std::io::Error::new(
++                    std::io::ErrorKind::TimedOut,
++                    "the line is idle",
++                ));
++            }
++            let n = buf.len().min(self.replies.len());
++            buf[..n].copy_from_slice(&self.replies[..n]);
++            self.replies.drain(..n);
++            Ok(n)
++        }
++
++        fn flush(&mut self) -> std::io::Result<()> {
++            Ok(())
++        }
++    }
++
++    /// A servo that never answers must not cost the tick the old 30 ms serial wait: the burst
++    /// ends after one settled interval, and the error still names the silent id. The fake sleeps
++    /// [`BURST_IDLE`] on an empty read, so the elapsed time here measures the real budget.
++    #[test]
++    fn a_missing_servo_ends_the_burst_promptly_and_is_named() {
++        let ids = [11u8, 20];
++        let present = servo_block(0x0100, 0, 0, 80, 30, 0);
++        // Only 11 answers; 20 is absent.
++        let mut io = FeetechIo::with_transport(Box::new(BurstTransport::new(ack(11, &present))));
++
++        let started = Instant::now();
++        let err = io
++            .sync_read_blocks(&ids, READ_ADDR, READ_LEN)
++            .expect_err("a silent id must fail the burst");
++        let elapsed = started.elapsed();
++
++        assert!(
++            elapsed < READ_TIMEOUT,
++            "a missing id must not be waited out with the {READ_TIMEOUT:?} addressed budget, \
++             but the burst took {elapsed:?}"
++        );
++        let message = err.to_string();
++        assert!(
++            message.contains("20"),
++            "the error must name the silent id: {message}"
++        );
++        assert!(
++            message.contains("missing"),
++            "the error must say the id is missing: {message}"
++        );
++    }
++
++    /// A device answering with a nonzero status is that device's answer, not the end of the
++    /// burst. The faulted frame arrives *first* here, so an implementation that still bailed out
++    /// on status would never collect id 20 and would then have to report it missing.
++    #[test]
++    fn a_faulted_servo_is_named_without_aborting_the_burst() {
++        let ids = [11u8, 20];
++        let present = servo_block(0x0200, 0, 0, 81, 31, 0);
++        let mut stream = ack_status(11, 0x08, &[]);
++        stream.extend_from_slice(&ack(20, &present));
++        let mut io = FeetechIo::with_transport(Box::new(BurstTransport::new(stream)));
++
++        let err = io
++            .sync_read_blocks(&ids, READ_ADDR, READ_LEN)
++            .expect_err("a faulted device must still fail the tick");
++
++        let message = err.to_string();
++        assert!(
++            message.contains("11"),
++            "the error must name the faulted id: {message}"
++        );
++        assert!(
++            message.contains("faulted"),
++            "the error must say the id faulted: {message}"
++        );
++        assert!(
++            message.contains("0x08"),
++            "the error must carry the status: {message}"
++        );
++        assert!(
++            !message.contains("missing") && !message.contains("20"),
++            "id 20 answered and must have been collected, not reported missing: {message}"
++        );
++    }
++
++    /// The happy path through the whole burst: replies arrive out of order, and the caller still
++    /// gets one block per requested id in request order. This is the `sync_read_blocks`-level
++    /// counterpart of the `drain_replies` test above.
++    #[test]
++    fn sync_read_returns_request_order_when_replies_arrive_out_of_order() {
++        let ids = [11u8, 20];
++        let first = servo_block(0x0100, 10, 0, 80, 30, 100);
++        let second = servo_block(0x0200, 20, 0, 81, 31, 200);
++        // The second servo answers first: legal on this bus, fatal to arrival-order code.
++        let mut stream = ack(20, &second);
++        stream.extend_from_slice(&ack(11, &first));
++        let mut io = FeetechIo::with_transport(Box::new(BurstTransport::new(stream)));
++
++        let blocks = io
++            .sync_read_blocks(&ids, READ_ADDR, READ_LEN)
++            .expect("every requested id answered");
++
++        assert_eq!(blocks[0].as_slice(), &first[..], "slot 0 must hold id 11's reply");
++        assert_eq!(
++            blocks[1].as_slice(),
++            &second[..],
++            "slot 1 must hold id 20's reply"
++        );
++    }
++
++    /// The IMU node answers the servo status address with its own telemetry map, so slot 0 and
++    /// slots 1.. must be decoded by different rules. The servo bytes below are full of values
++    /// the SFLP decoder would happily read as a loud gyro, which is what makes a slot mix-up
++    /// invisible without a test like this.
++    #[test]
++    fn imu_slot_is_decoded_as_sflp_and_servo_blocks_are_not() {
++        let mut imu_slot = [0u8; SERVO_BLOCK_LEN];
++        // A live SFLP quaternion so the decoder produces a real orientation.
++        imu_slot[6..8].copy_from_slice(&0x3000u16.to_le_bytes());
++
++        // Deliberate Dynamixel 2.0 header bytes (`FF FF FD`) in the servo payloads. On the
++        // old bus that sequence needed de-stuffing; a reader that resynchronised on it would
++        // tear the block apart instead of decoding it, so this pins the frame reader too.
++        let servo = servo_block(0xFFFF, 0x0700, 0, 82, 41, 300);
++
++        let mut blocks = vec![Vec::new(); NUM_JOINTS + 1];
++        blocks[0] = imu_slot.to_vec();
++        for slot in blocks.iter_mut().skip(1) {
++            *slot = servo.to_vec();
++        }
++
++        let mut decoder = SflpDecoder::default();
++        let mut decoded = None;
++        for _ in 0..3 {
++            decoded = Some(assemble_tick(&blocks, &mut decoder).unwrap());
++        }
++        let (sensors, raw, slow) = decoded.unwrap();
++
++        assert_eq!(
++            &raw[6..8],
++            &0x3000u16.to_le_bytes(),
++            "the SFLP prefix comes from slot 0"
++        );
++        assert_ne!(
++            sensors.imu.quat,
++            [1.0, 0.0, 0.0, 0.0],
++            "slot 0 was decoded as SFLP"
++        );
++        // The servo payload would decode as a large gyro; the gyro must instead be slot 0's
++        // three zero bytes. This is the assertion that a servo block never reaches SFLP.
++        assert_eq!(sensors.imu.gyro, [0.0, 0.0, 0.0]);
++
++        let expected_position = feetech::position_raw_to_counts(0xFFFF) as f64 * RAD_PER_COUNT;
++        for (joint, _) in JOINT_IDS.iter().enumerate() {
++            assert!((sensors.positions[joint] - expected_position).abs() < 1e-12);
++            assert!(
++                (sensors.velocities[joint] - 0x0700 as f64 * RAD_PER_SEC_PER_SPEED_COUNT).abs()
++                    < 1e-9
++            );
++            assert!((sensors.currents_ma[joint] - 300.0 * MA_PER_CURRENT_COUNT).abs() < 1e-9);
++        }
++
++        let slow = slow.unwrap();
++        assert!((slow.volts - 8.2).abs() < 1e-9);
++        assert_eq!(slow.temps_c, [41.0; NUM_JOINTS]);
++    }
++
++    /// State the folded slow-sensor sample directly: the tick's read carries voltage and
++    /// temperature, and a device reporting 0 V (the IMU node, and any servo that did not
++    /// measure) must not drag the pack average down.
++    #[test]
++    fn the_tick_folds_voltage_and_temperature_in() {
++        let mut blocks = vec![Vec::new(); NUM_JOINTS + 1];
++        blocks[0] = vec![0u8; SERVO_BLOCK_LEN]; // IMU node: 0 V, 0 °C in the tail
++        for (joint, slot) in blocks.iter_mut().skip(1).enumerate() {
++            let volts = if joint == 0 { 0 } else { 82 };
++            *slot = servo_block(0, 0, 0, volts, 40 + joint as u8, 0).to_vec();
++        }
++        let mut decoder = SflpDecoder::default();
++        let (_, _, slow) = assemble_tick(&blocks, &mut decoder).unwrap();
++        let slow = slow.unwrap();
++        // Fourteen servos read 8.2 V; the zero and the IMU slot are filtered out.
++        assert!((slow.volts - 8.2).abs() < 1e-9);
++        assert_eq!(slow.temps_c[0], 40.0);
++        assert_eq!(slow.temps_c[14], 54.0);
++    }
++
++    /// A byte pipe that answers the way a partly broken bus does: the ids in
++    /// `ack_writes_from` acknowledge a WRITE, every other node stays silent.
++    #[derive(Default)]
++    struct FakeState {
++        writes: Vec<u8>,
++        replies: Vec<u8>,
++    }
++
++    #[derive(Clone, Default)]
++    struct FakeTransport {
++        state: Arc<Mutex<FakeState>>,
++        ack_writes_from: Vec<u8>,
++    }
++
++    impl FakeTransport {
++        fn new(ack_writes_from: Vec<u8>) -> Self {
++            Self {
++                state: Arc::new(Mutex::new(FakeState::default())),
++                ack_writes_from,
++            }
++        }
++
++        fn writes(&self) -> Vec<u8> {
++            self.state.lock().unwrap().writes.clone()
++        }
++    }
++
++    impl Transport for FakeTransport {
++        fn write_all(&mut self, bytes: &[u8]) -> std::io::Result<()> {
++            let mut state = self.state.lock().unwrap();
++            state.writes.extend_from_slice(bytes);
++            let is_write = bytes.len() >= 6
++                && bytes[0] == 0xFF
++                && bytes[1] == 0xFF
++                && bytes[4] == feetech::inst::WRITE;
++            if is_write && self.ack_writes_from.contains(&bytes[2]) {
++                let frame = ack(bytes[2], &[]);
++                state.replies.extend_from_slice(&frame);
++            }
++            Ok(())
++        }
++
++        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
++            let mut state = self.state.lock().unwrap();
++            if state.replies.is_empty() {
++                return Err(std::io::Error::new(
++                    std::io::ErrorKind::TimedOut,
++                    "silent servo",
++                ));
++            }
++            let n = buf.len().min(state.replies.len());
++            buf[..n].copy_from_slice(&state.replies[..n]);
++            state.replies.drain(..n);
++            Ok(n)
++        }
++
++        fn flush(&mut self) -> std::io::Result<()> {
++            Ok(())
++        }
++    }
++
++    /// Count the addressed WRITE instructions in a byte log. A WRITE instruction frame parses
++    /// as an ack with `status` equal to the instruction byte, which is why this can reuse the
++    /// same framing the bus does.
++    fn count_write_frames(bytes: &[u8]) -> usize {
++        let mut reader = FrameReader::new();
++        reader.push(bytes);
++        let mut count = 0;
++        while let Some(frame) = reader.next_frame() {
++            let Ok(frame) = frame else { continue };
++            if frame.get(4) == Some(&feetech::inst::WRITE) {
++                count += 1;
++            }
++        }
++        count
++    }
++
++    /// The behaviour `set_torque` is documented for: a silent servo is reported *after* every
++    /// other servo has been written. Stopping at the first miss is what used to leave a robot
++    /// half-locked on the way to a power-off.
++    #[test]
++    fn set_torque_writes_every_servo_and_reports_only_the_silent_one() {
++        let silent = JOINT_IDS[2];
++        let acking: Vec<u8> = JOINT_IDS.iter().copied().filter(|id| *id != silent).collect();
++        let fake = FakeTransport::new(acking);
++        let handle = fake.clone();
++        let mut io = FeetechIo::with_transport(Box::new(fake));
++
++        let err = io.set_torque(true).expect_err("a silent servo must be reported");
++        let message = err.to_string();
++        assert!(
++            message.contains(&silent.to_string()),
++            "the failure must name id {silent}: {message}"
++        );
++        assert_eq!(
++            count_write_frames(&handle.writes()),
++            NUM_JOINTS,
++            "every servo must get its write, including the ones after the silent one"
++        );
++    }
++
++    /// Decode the addressed single-byte `WRITE` instructions in a byte log as `(id, address,
++    /// value)`. A WRITE instruction frame parses as an ack with `status` equal to the instruction
++    /// byte, so this walks the same framing the bus does.
++    fn write_frames(bytes: &[u8]) -> Vec<(u8, u8, u8)> {
++        let mut reader = FrameReader::new();
++        reader.push(bytes);
++        let mut out = Vec::new();
++        while let Some(frame) = reader.next_frame() {
++            let Ok(frame) = frame else { continue };
++            if frame.get(4) == Some(&feetech::inst::WRITE) {
++                if let (Some(id), Some(addr), Some(value)) =
++                    (frame.get(2), frame.get(5), frame.get(6))
++                {
++                    out.push((*id, *addr, *value));
++                }
++            }
++        }
++        out
++    }
++
++    /// Every instruction frame in a byte log, as `(id, instruction)`, in the order sent. Unlike
++    /// [`write_frames`] this keeps instructions that carry no address — the reboot among them.
++    fn instruction_frames(bytes: &[u8]) -> Vec<(u8, u8)> {
++        let mut reader = FrameReader::new();
++        reader.push(bytes);
++        let mut out = Vec::new();
++        while let Some(frame) = reader.next_frame() {
++            let Ok(frame) = frame else { continue };
++            if let (Some(id), Some(inst)) = (frame.get(2), frame.get(4)) {
++                out.push((*id, *inst));
++            }
++        }
++        out
++    }
++
++    /// `set_gain` writes the position-loop **RAM** registers the vendor memory table documents:
++    /// `Kp` at address 50 with the value passed through, and `Kd` at 51 zeroed so the factory
++    /// differential gain cannot damp the servo's own loop. Every joint gets both writes.
++    #[test]
++    fn set_gain_writes_kp_and_kd_to_every_joint() {
++        let fake = FakeTransport::new(JOINT_IDS.to_vec());
++        let handle = fake.clone();
++        let mut io = FeetechIo::with_transport(Box::new(fake));
++        io.set_gain(200).unwrap();
++
++        let writes = write_frames(&handle.writes());
++        assert_eq!(writes.len(), NUM_JOINTS * 2, "one Kp and one Kd write per joint");
++        for (joint, pair) in writes.chunks(2).enumerate() {
++            let id = JOINT_IDS[joint];
++            assert_eq!(pair[0], (id, GAIN_KP_ADDR, 200), "Kp must go to RAM address 50");
++            assert_eq!(pair[1], (id, GAIN_KD_ADDR, 0), "Kd must be zeroed at RAM address 51");
++        }
++        assert!(
++            writes.iter().all(|(_, addr, _)| !matches!(*addr, 21 | 22 | 52)),
++            "Ki (52) is invalid in position mode and the EEPROM defaults (21/22) are not \
++             per-run writes"
++        );
++    }
++
++    /// The vendor range for `Kp`/`Kd` is 0..254, so a larger `kp` must clamp: a `u16` sent as a
++    /// single byte would otherwise wrap and command a small gain where a large one was asked for.
++    #[test]
++    fn set_gain_clamps_to_the_register_range() {
++        let fake = FakeTransport::new(JOINT_IDS.to_vec());
++        let handle = fake.clone();
++        let mut io = FeetechIo::with_transport(Box::new(fake));
++        io.set_gain(1000).unwrap();
++        let writes = write_frames(&handle.writes());
++        assert!(!writes.is_empty());
++        assert!(
++            writes.chunks(2).all(|pair| pair[0].2 == 254),
++            "Kp must clamp to 254, the top of 0..254"
++        );
++    }
++
++    /// `reboot` must cut torque (address 40 = 0) and then put exactly one REBOOT (`0x08`)
++    /// instruction on the wire for the named id. It must be `0x08` and not `RESET` (`0x0A`): the
++    /// latter is a factory reset that would wipe the servo's id and baud rate.
++    #[test]
++    fn reboot_cuts_torque_then_sends_one_reboot_instruction() {
++        let id = JOINT_IDS[3];
++        // Only the torque write is acknowledged; a reboot has no reply to give.
++        let fake = FakeTransport::new(vec![id]);
++        let handle = fake.clone();
++        let mut io = FeetechIo::with_transport(Box::new(fake));
++
++        io.reboot(id)
++            .expect("a servo answering the torque write must reboot");
++
++        let writes = handle.writes();
++        assert_eq!(
++            write_frames(&writes),
++            vec![(id, feetech::reg::TORQUE_ENABLE, 0)],
++            "torque must go off first, once, on the named servo"
++        );
++        assert_eq!(
++            instruction_frames(&writes),
++            vec![(id, feetech::inst::WRITE), (id, REBOOT_INST)],
++            "exactly the torque write and one REBOOT, in that order, on the right id"
++        );
++        assert!(
++            !instruction_frames(&writes)
++                .iter()
++                .any(|(_, inst)| *inst == feetech::inst::RESET),
++            "RESET (0x0A) is a factory reset and must never be sent as a reboot"
++        );
++    }
++
++    /// The reboot instruction is unacknowledged, so `reboot` must return as soon as the frame is
++    /// on the wire. The fake acknowledges the torque write and then stays silent: an
++    /// implementation that waited for a reply — as `exchange` does — would spend the whole
++    /// [`READ_TIMEOUT`] and fail.
++    #[test]
++    fn reboot_returns_without_waiting_for_an_acknowledgement() {
++        let id = JOINT_IDS[0];
++        let fake = FakeTransport::new(vec![id]);
++        let handle = fake.clone();
++        let mut io = FeetechIo::with_transport(Box::new(fake));
++
++        let started = Instant::now();
++        io.reboot(id)
++            .expect("a reboot answers nothing, and that must not be an error");
++        let elapsed = started.elapsed();
++
++        assert!(
++            elapsed < READ_TIMEOUT,
++            "a reboot has no reply to wait for, but it took {elapsed:?}"
++        );
++        assert_eq!(
++            instruction_frames(&handle.writes())
++                .iter()
++                .filter(|(_, inst)| *inst == REBOOT_INST)
++                .count(),
++            1,
++            "the REBOOT instruction still has to reach the wire"
++        );
+     }
+ 
+     fn block(n: u8) -> [u8; IMU_BLOCK_LEN] {
+diff --git a/duck-control/src/feetech.rs b/duck-control/src/feetech.rs
+new file mode 100644
+index 0000000..9e47ce5
+--- /dev/null
++++ b/duck-control/src/feetech.rs
+@@ -0,0 +1,520 @@
++//! FeeTech SCS/HLS serial protocol, as spoken by the HD-1910-C001 joint servo
++//! and by the `imu_to_dxl` node's FeeTech personality.
++//!
++//! This module is deliberately dependency-free: it is pure framing and
++//! conversion code with unit tests, so it can be dropped into `duck-control`
++//! (or any other crate) without pulling anything in. See
++//! `soft_imu_to_dxl/v1/patches/microduck_feetech_patch.md` for how `bus.rs`
++//! uses it, and `飞特通讯协议/飞特通讯协议说明.md` for the protocol write-up.
++//!
++//! Frame layout (all little endian for multi-byte fields):
++//!
++//! ```text
++//! instruction: FF FF ID LEN INST [ADDR] [DATA...] ~SUM
++//!              LEN = 1 (INST) + ADDR? + DATA + 1 (SUM)
++//! ack:         FF FF ID LEN STATUS [DATA...] ~SUM
++//!              LEN = 1 (STATUS) + DATA + 1 (SUM)
++//! SUM          = ID + LEN + INST + ADDR + ΣDATA    (ADDR counts as 0 when absent)
++//! ```
++//!
++//! Sources: `FTServo_Linux-main/src/SCS.cpp` (`writeBuf`, `Ack`, `Read`,
++//! `syncReadPacketTx`, `syncWrite`), `INST.h` and `HLSCL.h`.
++
++/// Sum that goes into the checksum: every byte from ID up to (but excluding)
++/// the checksum itself. `ADDR` is included only when the frame carries one, and
++/// the reference library adds it as 0 for the instructions without it.
++fn checksum_sum(id: u8, len: u8, inst: u8, addr: u8, data: &[u8]) -> u8 {
++    let mut sum = id
++        .wrapping_add(len)
++        .wrapping_add(inst)
++        .wrapping_add(addr);
++    for byte in data {
++        sum = sum.wrapping_add(*byte);
++    }
++    sum
++}
++
++/// The byte actually sent: bitwise complement of [`checksum_sum`].
++pub fn checksum(id: u8, len: u8, inst: u8, addr: u8, data: &[u8]) -> u8 {
++    !checksum_sum(id, len, inst, addr, data)
++}
++
++/// Instruction set (`INST.h`).
++pub mod inst {
++    pub const PING: u8 = 0x01;
++    pub const READ: u8 = 0x02;
++    pub const WRITE: u8 = 0x03;
++    pub const REG_WRITE: u8 = 0x04;
++    pub const REG_ACTION: u8 = 0x05;
++    pub const RECOVERY: u8 = 0x06;
++    pub const SYNC_READ: u8 = 0x82;
++    pub const SYNC_WRITE: u8 = 0x83;
++    pub const RESET: u8 = 0x0A;
++    pub const CAL: u8 = 0x0B;
++}
++
++/// HLS memory table addresses (`HLSCL.h`).
++pub mod reg {
++    pub const MODEL_L: u8 = 3;
++    pub const MODEL_H: u8 = 4;
++    pub const ID: u8 = 5;
++    pub const BAUD_RATE: u8 = 6;
++    pub const SECOND_ID: u8 = 7;
++    pub const MIN_ANGLE_LIMIT_L: u8 = 9;
++    pub const MAX_ANGLE_LIMIT_L: u8 = 11;
++    pub const CW_DEAD: u8 = 26;
++    pub const CCW_DEAD: u8 = 27;
++    pub const OFS_L: u8 = 31;
++    pub const MODE: u8 = 33;
++    pub const TORQUE_ENABLE: u8 = 40;
++    pub const ACC: u8 = 41;
++    pub const GOAL_POSITION_L: u8 = 42;
++    pub const GOAL_TORQUE_L: u8 = 44;
++    pub const GOAL_SPEED_L: u8 = 46;
++    pub const TORQUE_LIMIT_L: u8 = 48;
++    pub const LOCK: u8 = 55;
++    pub const PRESENT_POSITION_L: u8 = 56;
++    pub const PRESENT_SPEED_L: u8 = 58;
++    pub const PRESENT_LOAD_L: u8 = 60;
++    pub const PRESENT_VOLTAGE: u8 = 62;
++    pub const PRESENT_TEMPERATURE: u8 = 63;
++    pub const MOVING: u8 = 66;
++    pub const PRESENT_CURRENT_L: u8 = 69;
++}
++
++pub const BROADCAST_ID: u8 = 0xFE;
++/// Largest frame the protocol can produce (LEN is a u8).
++pub const MAX_FRAME: usize = 4 + 255;
++
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub enum Error {
++    /// A frame arrived but the header/length/checksum did not hold together.
++    BadFrame(&'static str),
++    /// The reply carried a different id than the one addressed.
++    WrongId { got: u8, want: u8 },
++    /// The device answered with a non-zero status byte.
++    DeviceStatus(u8),
++    /// Fewer bytes came back than the protocol demanded.
++    ShortData { got: usize, want: usize },
++}
++
++impl std::fmt::Display for Error {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        match self {
++            Error::BadFrame(why) => write!(f, "bad feetech frame: {why}"),
++            Error::WrongId { got, want } => write!(f, "feetech reply from id {got}, expected {want}"),
++            Error::DeviceStatus(status) => write!(f, "feetech device status {status:#04x}"),
++            Error::ShortData { got, want } => write!(f, "feetech data {got} bytes, expected {want}"),
++        }
++    }
++}
++
++impl std::error::Error for Error {}
++
++// ── packet construction ─────────────────────────────────────────────────────
++
++/// Instruction with no ADDR (PING, REG_ACTION, RESET, CAL):
++/// `LEN = 2`, and the checksum includes ADDR as zero.
++pub fn instruction_no_addr(id: u8, instruction: u8) -> Vec<u8> {
++    let len = 2u8;
++    let sum = checksum(id, len, instruction, 0, &[]);
++    vec![0xFF, 0xFF, id, len, instruction, sum]
++}
++
++/// Instruction with ADDR + DATA: `LEN = DATA + 3`.
++pub fn instruction(id: u8, instruction: u8, addr: u8, data: &[u8]) -> Vec<u8> {
++    let len = (data.len() as u8).wrapping_add(3);
++    let sum = checksum(id, len, instruction, addr, data);
++    let mut frame = Vec::with_capacity(6 + data.len());
++    frame.extend_from_slice(&[0xFF, 0xFF, id, len, instruction, addr]);
++    frame.extend_from_slice(data);
++    frame.push(sum);
++    frame
++}
++
++pub fn ping(id: u8) -> Vec<u8> {
++    instruction_no_addr(id, inst::PING)
++}
++
++/// READ: data is `[len]`, so `LEN = 4`.
++pub fn read(id: u8, addr: u8, len: u8) -> Vec<u8> {
++    instruction(id, inst::READ, addr, &[len])
++}
++
++pub fn write(id: u8, addr: u8, data: &[u8]) -> Vec<u8> {
++    instruction(id, inst::WRITE, addr, data)
++}
++
++pub fn reg_write(id: u8, addr: u8, data: &[u8]) -> Vec<u8> {
++    instruction(id, inst::REG_WRITE, addr, data)
++}
++
++pub fn reg_action(id: u8) -> Vec<u8> {
++    instruction_no_addr(id, inst::REG_ACTION)
++}
++
++pub fn reset(id: u8) -> Vec<u8> {
++    instruction_no_addr(id, inst::RESET)
++}
++
++/// SYNC_READ: `FF FF FE (IDN+4) 82 ADDR nLen ID... ~SUM`.
++pub fn sync_read(ids: &[u8], addr: u8, len: u8) -> Vec<u8> {
++    let frame_len = (ids.len() as u8).wrapping_add(4);
++    let mut sum = 0xFEu8
++        .wrapping_add(frame_len)
++        .wrapping_add(inst::SYNC_READ)
++        .wrapping_add(addr)
++        .wrapping_add(len);
++    let mut frame = Vec::with_capacity(7 + ids.len());
++    frame.extend_from_slice(&[0xFF, 0xFF, BROADCAST_ID, frame_len, inst::SYNC_READ, addr, len]);
++    for id in ids {
++        frame.push(*id);
++        sum = sum.wrapping_add(*id);
++    }
++    frame.push(!sum);
++    frame
++}
++
++/// SYNC_WRITE: `FF FF FE ((nLen+1)*IDN+4) 83 ADDR nLen ID DATA... ~SUM`.
++pub fn sync_write(ids: &[u8], addr: u8, payloads: &[&[u8]]) -> Result<Vec<u8>, Error> {
++    if ids.is_empty() || ids.len() != payloads.len() {
++        return Err(Error::BadFrame("sync_write ids/payload mismatch"));
++    }
++    let width = payloads[0].len();
++    if payloads.iter().any(|p| p.len() != width) {
++        return Err(Error::BadFrame("sync_write payload width mismatch"));
++    }
++    let width_u8 = u8::try_from(width).map_err(|_| Error::BadFrame("sync_write payload too wide"))?;
++    let frame_len = ((width as u32 + 1) * ids.len() as u32 + 4) as u8; // wrapping is fine: protocol limit
++    let mut sum = 0xFEu8
++        .wrapping_add(frame_len)
++        .wrapping_add(inst::SYNC_WRITE)
++        .wrapping_add(addr)
++        .wrapping_add(width_u8);
++    let mut frame = vec![
++        0xFF,
++        0xFF,
++        BROADCAST_ID,
++        frame_len,
++        inst::SYNC_WRITE,
++        addr,
++        width_u8,
++    ];
++    for (id, payload) in ids.iter().zip(payloads) {
++        frame.push(*id);
++        sum = sum.wrapping_add(*id);
++        for byte in *payload {
++            frame.push(*byte);
++            sum = sum.wrapping_add(*byte);
++        }
++    }
++    frame.push(!sum);
++    Ok(frame)
++}
++
++// ── packet parsing ──────────────────────────────────────────────────────────
++
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct Ack {
++    pub id: u8,
++    pub status: u8,
++    pub data: Vec<u8>,
++}
++
++pub fn parse_ack(frame: &[u8]) -> Result<Ack, Error> {
++    if frame.len() < 6 {
++        return Err(Error::BadFrame("shorter than a ping ack"));
++    }
++    if frame[0] != 0xFF || frame[1] != 0xFF {
++        return Err(Error::BadFrame("missing header"));
++    }
++    let len = frame[3] as usize;
++    if len < 2 {
++        return Err(Error::BadFrame("LEN < 2"));
++    }
++    if frame.len() != len + 4 {
++        return Err(Error::BadFrame("LEN does not match frame length"));
++    }
++    let body = &frame[2..frame.len() - 1];
++    let expect = !body.iter().fold(0u8, |acc, b| acc.wrapping_add(*b));
++    if expect != frame[frame.len() - 1] {
++        return Err(Error::BadFrame("checksum"));
++    }
++    Ok(Ack {
++        id: frame[2],
++        status: frame[4],
++        data: frame[5..frame.len() - 1].to_vec(),
++    })
++}
++
++/// Total frame length if `buf` starts with a complete frame.
++pub fn frame_len(buf: &[u8]) -> Option<usize> {
++    if buf.len() < 4 {
++        return None;
++    }
++    if buf[0] != 0xFF || buf[1] != 0xFF || buf[3] < 2 {
++        return None;
++    }
++    let total = buf[3] as usize + 4;
++    (buf.len() >= total).then_some(total)
++}
++
++/// Reassembles frames out of a byte stream: debug text, partial frames and
++/// noise are tolerated, exactly like the C node does on the other side.
++#[derive(Debug, Default)]
++pub struct FrameReader {
++    buf: Vec<u8>,
++}
++
++impl FrameReader {
++    pub fn new() -> Self {
++        Self { buf: Vec::new() }
++    }
++
++    pub fn push(&mut self, bytes: &[u8]) {
++        self.buf.extend_from_slice(bytes);
++    }
++
++    /// Bytes discarded while resynchronising (for the health counters).
++    pub fn next_frame(&mut self) -> Option<Result<Vec<u8>, usize>> {
++        loop {
++            let Some(start) = self.buf.windows(2).position(|w| w == [0xFF, 0xFF]) else {
++                let dropped = self.buf.len().saturating_sub(1);
++                self.buf.drain(..dropped);
++                return None;
++            };
++            if start > 0 {
++                self.buf.drain(..start);
++            }
++            if self.buf.len() < 4 {
++                return None;
++            }
++            let total = self.buf[3] as usize + 4;
++            if self.buf[3] < 2 || total > MAX_FRAME {
++                // not a plausible frame: step past this header
++                self.buf.remove(0);
++                continue;
++            }
++            if self.buf.len() < total {
++                return None;
++            }
++            let frame: Vec<u8> = self.buf.drain(..total).collect();
++            return Some(parse_ack(&frame).map(|_| frame).map_err(|_| total));
++        }
++    }
++
++    pub fn clear(&mut self) {
++        self.buf.clear();
++    }
++
++    pub fn buffered(&self) -> usize {
++        self.buf.len()
++    }
++}
++
++// ── conversions ─────────────────────────────────────────────────────────────
++
++/// Position is a 15-bit signed count: bit 15 is the direction flag and bits
++/// 14..0 the magnitude (`HLSCL::ReadPos`).
++pub fn position_raw_to_counts(raw: u16) -> i32 {
++    let magnitude = (raw & 0x7FFF) as i32;
++    if raw & 0x8000 != 0 {
++        -magnitude
++    } else {
++        magnitude
++    }
++}
++
++pub fn position_counts_to_raw(counts: i32) -> u16 {
++    let magnitude = counts.unsigned_abs().min(0x7FFF) as u16;
++    if counts < 0 {
++        magnitude | 0x8000
++    } else {
++        magnitude
++    }
++}
++
++/// Counts per revolution.
++///
++/// The HLS memory table ("磁编码HLS舵机-内存表解析", §2.3/§2.4) gives the unit of
++/// both `目标位置` and `当前位置` as **0.087°**, i.e. 4096 counts per 360°, and
++/// the 16-bit field as `-32767..32767` with bit 15 as the direction bit — so the
++/// range is multi-turn (about ±8 revolutions), not one turn in 15 bits.
++///
++/// Getting this wrong is an 8x error on every joint angle: an earlier revision of
++/// this file used 32768 counts/rev from a second-hand note, which the vendor
++/// table contradicts.  Re-confirm against the HD-1910-C001 sheet before the first
++/// hardware run, but 0.087°/count is what the HLS documentation says.
++pub const POSITION_COUNTS_PER_REV: f64 = 4096.0;
++
++pub const RAD_PER_COUNT: f64 = std::f64::consts::TAU / POSITION_COUNTS_PER_REV;
++
++/// RPM per speed count (`60 * 0.732 = 43.92 rpm` in the reference example).
++pub const RPM_PER_SPEED_COUNT: f64 = 0.732;
++
++pub const RAD_PER_SEC_PER_SPEED_COUNT: f64 = RPM_PER_SPEED_COUNT * std::f64::consts::TAU / 60.0;
++
++/// Milliamps per current count (`Torque = 300 * 6.5 = 1950 mA` in the example).
++pub const MA_PER_CURRENT_COUNT: f64 = 6.5;
++
++/// Volts per count of `PRESENT_VOLTAGE` (same scale as the Dynamixel family).
++pub const VOLTS_PER_COUNT: f64 = 0.1;
++
++/// Speed/current are 16-bit little endian, sign included in the same word.
++pub fn le_i16(low: u8, high: u8) -> i16 {
++    i16::from_le_bytes([low, high])
++}
++
++pub fn le_u16(low: u8, high: u8) -> u16 {
++    u16::from_le_bytes([low, high])
++}
++
++pub fn position_rad(low: u8, high: u8) -> f64 {
++    position_raw_to_counts(le_u16(low, high)) as f64 * RAD_PER_COUNT
++}
++
++pub fn position_from_rad(rad: f64) -> [u8; 2] {
++    let counts = (rad / RAD_PER_COUNT).round() as i32;
++    position_counts_to_raw(counts).to_le_bytes()
++}
++
++// ── tests ───────────────────────────────────────────────────────────────────
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    /// The same vectors the firmware asserts in `host/tools/test_protocols.c`
++    /// and the host tool in `host/bus.py`, so all three implementations agree
++    /// byte for byte on the wire.
++    #[test]
++    fn ping_frame_matches_the_firmware_vector() {
++        assert_eq!(ping(200), vec![0xFF, 0xFF, 0xC8, 0x02, 0x01, 0x34]);
++    }
++
++    #[test]
++    fn read_frame_matches_the_firmware_vector() {
++        assert_eq!(read(200, 56, 12), vec![0xFF, 0xFF, 0xC8, 0x04, 0x02, 0x38, 0x0C, 0xED]);
++    }
++
++    #[test]
++    fn ack_ping_from_the_node_parses() {
++        let ack = parse_ack(&[0xFF, 0xFF, 200, 0x02, 0x00, 0x35]).unwrap();
++        assert_eq!(ack, Ack { id: 200, status: 0, data: vec![] });
++    }
++
++    /// The node answers a 12-byte telemetry read with `LEN = 14`; the payload
++    /// must come back untouched.
++    #[test]
++    fn ack_with_data_parses() {
++        let payload: Vec<u8> = (0..12).collect();
++        let mut frame = vec![0xFF, 0xFF, 200, 14, 0x00];
++        frame.extend_from_slice(&payload);
++        let sum = !frame[2..].iter().fold(0u8, |a, b| a.wrapping_add(*b));
++        frame.push(sum);
++        let ack = parse_ack(&frame).unwrap();
++        assert_eq!(ack.data, payload);
++    }
++
++    #[test]
++    fn ack_rejects_a_corrupted_checksum() {
++        let mut frame = vec![0xFF, 0xFF, 200, 0x02, 0x00, 0x35];
++        *frame.last_mut().unwrap() ^= 0xFF;
++        assert!(matches!(parse_ack(&frame), Err(Error::BadFrame("checksum"))));
++    }
++
++    /// The sync frames must reproduce the library's LEN formulas exactly:
++    /// `IDN + 4` for sync read and `(nLen + 1) * IDN + 4` for sync write.
++    #[test]
++    fn sync_read_length_formula() {
++        for ids in [vec![1u8], vec![1, 2], vec![200, 10, 11, 12]] {
++            let frame = sync_read(&ids, 56, 12);
++            assert_eq!(frame[3] as usize, ids.len() + 4);
++            assert_eq!(frame.len(), frame[3] as usize + 4);
++        }
++    }
++
++    #[test]
++    fn sync_write_length_formula() {
++        let payload = [0u8; 2];
++        let frame = sync_write(&[1, 2, 3], 42, &[&payload, &payload, &payload]).unwrap();
++        assert_eq!(frame[3] as usize, (2 + 1) * 3 + 4);
++        assert_eq!(frame.len(), frame[3] as usize + 4);
++        // rebuilding the same checksum by hand must agree
++        let body = &frame[2..frame.len() - 1];
++        assert_eq!(!body.iter().fold(0u8, |a, b| a.wrapping_add(*b)), *frame.last().unwrap());
++    }
++
++    #[test]
++    fn sync_write_rejects_mismatched_payloads() {
++        assert!(sync_write(&[1, 2], 42, &[&[0u8; 2][..]]).is_err());
++        assert!(sync_write(&[], 42, &[]).is_err());
++    }
++
++    #[test]
++    fn frame_reader_resynchronises_past_debug_text() {
++        let mut reader = FrameReader::new();
++        reader.push(b"# stats 12\r\n");
++        reader.push(&ping(200));
++        reader.push(b"trailing");
++        let frame = reader.next_frame().unwrap().unwrap();
++        assert_eq!(parse_ack(&frame).unwrap().id, 200);
++        assert!(reader.next_frame().is_none());
++        // resynchronising keeps only a possible partial header
++        assert!(reader.buffered() <= 1);
++    }
++
++    #[test]
++    fn frame_reader_waits_for_a_complete_frame() {
++        let mut reader = FrameReader::new();
++        let ack = [0xFF, 0xFF, 200, 0x02, 0x00, 0x35];
++        reader.push(&ack[..3]);
++        assert!(reader.next_frame().is_none());
++        reader.push(&ack[3..]);
++        assert!(reader.next_frame().unwrap().is_ok());
++    }
++
++    /// 15-bit sign-magnitude position: a bare `as i16` would read bit 15 as a
++    /// large positive count instead of a direction flag.
++    #[test]
++    fn position_uses_the_direction_bit() {
++        assert_eq!(position_raw_to_counts(0x1234), 0x1234);
++        assert_eq!(position_raw_to_counts(0x9234), -0x1234);
++        assert_eq!(position_raw_to_counts(0x8000), 0);
++        assert_eq!(position_counts_to_raw(-0x1234), 0x9234);
++        assert_eq!(position_counts_to_raw(0x1234), 0x1234);
++    }
++
++    #[test]
++    fn position_radians_round_trip() {
++        for rad in [-3.0, 0.0, 0.5, 3.0] {
++            let [low, high] = position_from_rad(rad);
++            let back = position_rad(low, high);
++            assert!((back - rad).abs() < RAD_PER_COUNT, "{rad} -> {back}");
++        }
++    }
++
++    #[test]
++    fn documented_scales_match_the_vendor_memory_table() {
++        // 60 speed counts -> 43.92 rpm, the example in the FeeTech sources
++        assert!((60.0 * RPM_PER_SPEED_COUNT - 43.92).abs() < 1e-9);
++        // 300 current counts -> 1950 mA
++        assert!((300.0 * MA_PER_CURRENT_COUNT - 1950.0).abs() < 1e-9);
++        // 0.087 degrees per count: a quarter turn is 1024 counts
++        let quarter = 1024.0 * RAD_PER_COUNT;
++        assert!((quarter - std::f64::consts::FRAC_PI_2).abs() < 1e-9, "{quarter}");
++        // one full turn is 4096 counts
++        assert!((POSITION_COUNTS_PER_REV * RAD_PER_COUNT - std::f64::consts::TAU).abs() < 1e-12);
++        // and the 15-bit magnitude spans about eight turns (multi-turn field)
++        let span_turns =
++            (position_raw_to_counts(0xFFFF) as f64 * RAD_PER_COUNT / std::f64::consts::TAU).abs();
++        assert!((7.99..=8.0).contains(&span_turns), "{span_turns} turns");
++    }
++
++    #[test]
++    fn voltages_and_temperatures_are_plain_counts() {
++        assert!((le_u16(0x50, 0x00) as f64 * VOLTS_PER_COUNT - 8.0).abs() < 1e-9);
++        assert_eq!(le_i16(0x2C, 0x01), 300);
++        assert_eq!(le_i16(0x00, 0xFF), -256);
++    }
++}
+diff --git a/duck-control/src/imu.rs b/duck-control/src/imu.rs
+index 4ed8d70..4b5a657 100644
+--- a/duck-control/src/imu.rs
++++ b/duck-control/src/imu.rs
+@@ -1,6 +1,6 @@
+ //! The `imu_to_dxl` v2 board (LSM6DSV16X), decoded.
+ //!
+-//! One IMU, one code path. The board rides the Dynamixel bus and its 12-byte block is
++//! One IMU, one code path. The board shares the servo bus and its 12-byte block is
+ //! fetched in the same `sync_read` as the servos, so there is no separate sensor to poll
+ //! and no fusion to run on the host — the chip's SFLP block ships a game-rotation
+ //! quaternion and estimates its own gyro bias.
+diff --git a/duck-control/src/io.rs b/duck-control/src/io.rs
+index 8230406..a387b69 100644
+--- a/duck-control/src/io.rs
++++ b/duck-control/src/io.rs
+@@ -4,7 +4,7 @@
+ //! plain data, which is what makes the loop testable without a robot.
+ //!
+ //! [`Sensors`] carries joints *and* IMU together because that is what the hardware does:
+-//! the IMU board sits on the Dynamixel bus and is fetched in the same transaction as the
++//! the IMU board shares the servo bus and is fetched in the same transaction as the
+ //! servos. A trait that split them would invent a distinction the bus does not have, and
+ //! would double the bus traffic to honour it.
+ 
+@@ -134,20 +134,23 @@ pub trait RobotIo {
+     /// never because a process began.
+     fn set_torque(&mut self, on: bool) -> Result<()>;
+ 
+-    /// Reboot one servo: the Protocol 2 REBOOT instruction.
++    /// Reboot one servo, where the protocol has such an instruction.
+     ///
+     /// The way out of a latched hardware error — overload, overheating, electrical shock, the
+-    /// `shutdown` mask — which otherwise holds torque off until the battery is pulled. The servo is
+-    /// off the bus for a few hundred milliseconds and comes back with torque off and its RAM
+-    /// registers, the gains among them, at their EEPROM defaults; the caller owns putting them back.
++    /// `shutdown` mask — which otherwise holds torque off until the battery is pulled. On the
++    /// Dynamixel bus this was protocol 2's REBOOT; on the FeeTech bus it is instruction `0x08`,
++    /// which is unacknowledged, so the call returns as soon as the frame is on the wire. The
++    /// servo is off the bus for **823 ms** measured on the HD-1910-C001 (the vendor manual says
++    /// ~800 ms) and comes back with torque off and its RAM registers, the gains among them, at
++    /// their EEPROM defaults; the caller owns putting them back.
+     fn reboot(&mut self, id: u8) -> Result<()>;
+ 
+-    /// Supply voltage and case temperatures, in one extra transaction.
++    /// Supply voltage and case temperatures.
+     ///
+-    /// Not part of [`Sensors`], and not on the tick's critical path: these registers sit at
+-    /// 144–146, past the end of the contiguous block [`Self::read`] fetches, so reaching them
+-    /// costs a transaction of its own — about a millisecond. Negligible once a second, 5% of
+-    /// the budget at 50 Hz.
++    /// Not part of [`Sensors`], and on the FeeTech bus no longer a transaction of its own:
++    /// voltage (62) and temperature (63) sit inside the block [`Self::read`] already fetches,
++    /// so the backend answers from the tick's sample and the caller keeps its previous value
++    /// across a failed tick. A backend without that layout may still read them separately.
+     fn slow_sensors(&mut self) -> Result<SlowSensors>;
+ 
+     /// Diagnostics the bus keeps about itself. Default to "nothing to report" so a fake or a
+diff --git a/duck-control/src/lib.rs b/duck-control/src/lib.rs
+index ca6f95d..e0b063e 100644
+--- a/duck-control/src/lib.rs
++++ b/duck-control/src/lib.rs
+@@ -9,6 +9,7 @@
+ 
+ pub mod bus;
+ pub mod fall;
++pub mod feetech;
+ pub mod imu;
+ pub mod io;
+ pub mod model;
+diff --git a/duck-control/src/model.rs b/duck-control/src/model.rs
+index ef1f144..dadafdb 100644
+--- a/duck-control/src/model.rs
++++ b/duck-control/src/model.rs
+@@ -11,7 +11,7 @@
+ /// Left leg (5) · neck/head/mouth (5) · right leg (5).
+ pub const NUM_JOINTS: usize = 15;
+ 
+-/// Dynamixel IDs, indexed as [`JOINT_NAMES`].
++/// Servo bus IDs, indexed as [`JOINT_NAMES`].
+ pub const JOINT_IDS: [u8; NUM_JOINTS] = [
+     20, 21, 22, 23, 24, // left leg
+     30, 31, 32, 33, 34, // neck, head, mouth
+@@ -73,25 +73,27 @@ pub fn mouth_target(open: f64) -> f64 {
+     MOUTH_CLOSED + open * (MOUTH_OPEN - MOUTH_CLOSED)
+ }
+ 
+-/// The `imu_to_dxl` v2 board's Dynamixel ID. It rides the motor bus and is read in the
+-/// same transaction as the servos ([`crate::bus`]).
++/// The `imu_to_dxl` node's bus id. It rides the motor bus and is read in the same
++/// transaction as the servos ([`crate::bus`]). The name keeps the `DXL` because it is the
++/// id the board has always answered to; the protocol on the wire is FeeTech now.
+ pub const IMU_DXL_ID: u8 = 200;
+ 
+ pub const BAUD_RATE: u32 = 1_000_000;
+ 
+-/// EEPROM registers asserted (and corrected) at startup.
++/// The FeeTech EEPROM register the startup check verifies *by value*, and corrects if wrong.
+ ///
+-/// `return_delay_time` is the load-bearing one: the XL330 ships at 250, which is 500 µs of
+-/// turnaround *per device*. Across 16 devices that is 8 ms per tick — 40% of a 20 ms budget
+-/// — spent waiting for servos to get around to answering. The rest are here because the
+-/// runtime found them worth pinning; `shutdown = 52` is the error mask that latches on
+-/// overload, overheating and input-voltage faults.
+-pub const EXPECTED_REGISTERS: &[(&str, u8)] = &[
+-    ("return_delay_time", 0),
+-    ("baud_rate", 3), // 3 = 1 Mbps, must agree with BAUD_RATE
+-    ("pwm_slope", 255),
+-    ("shutdown", 52),
+-];
++/// FeeTech HLS baud code 0 is 1 Mbps (the `dev_fee_baud()` table in
++/// `soft_imu_to_dxl/v1/src/dev.c`), and it must agree with [`BAUD_RATE`]. The HLS baud register
++/// (address 6) is documented in the vendor memory table as ranging over only **0..7**
++/// (0=1 Mbps, 1=500k, 2=250k, 3=128k, 4=115200, 5=76800, 6=57600, 7=38400), so any value outside
++/// that set is a wrong baud code, not a faster bus. The XL330's
++/// `return_delay_time` is deliberately gone: the FeeTech bus acknowledges every instruction,
++/// so there is no per-device turnaround budget to pin, and the old `pwm_slope`/`shutdown`
++/// registers have no address that is known for the HD-1910-C001 — guessing one would write a
++/// random register on a real robot. The id is checked too, against [`JOINT_IDS`] itself
++/// rather than a table, since its expected value is per joint. See
++/// [`crate::bus::FeetechIo::check_registers`].
++pub const EXPECTED_BAUD_CODE: u8 = 0;
+ 
+ /// Index of a joint by name. Linear scan over 15 entries, used at startup and in tests.
+ pub fn joint_index(name: &str) -> Option<usize> {
+@@ -101,8 +103,8 @@ pub fn joint_index(name: &str) -> Option<usize> {
+ // ── battery ──────────────────────────────────────────────────────────────────
+ //
+ // There is no fuel gauge and no ADC. The only measurement available is what the servos
+-// report as their own supply (`crate::bus::DynamixelIo::bus_voltage`), which is the pack
+-// seen through the bus — so it sags under load and recovers when the robot stands still.
++// report as their own supply (`crate::bus::FeetechIo`, through `slow_sensors`), which is the
++// pack seen through the bus — so it sags under load and recovers when the robot stands still.
+ // That is why the span below is *usable-under-load*, not the cell chemistry's range.
+ 
+ /// Off a full charge, under load. NP-F550, 2S Li-ion.
+@@ -141,7 +143,7 @@ mod tests {
+         assert_eq!(DEFAULT_POSITION.len(), NUM_JOINTS);
+     }
+ 
+-    /// A duplicated Dynamixel ID makes a `sync_read` return blocks that cannot be matched
++    /// A duplicated bus id makes a `sync_read` return blocks that cannot be matched
+     /// back to joints, and a `sync_write` command two joints at once. Both fail in ways
+     /// that look like a wiring fault.
+     #[test]
+@@ -149,7 +151,7 @@ mod tests {
+         let mut seen = JOINT_IDS;
+         seen.sort_unstable();
+         seen.windows(2)
+-            .for_each(|w| assert_ne!(w[0], w[1], "duplicate Dynamixel ID {}", w[0]));
++            .for_each(|w| assert_ne!(w[0], w[1], "duplicate servo id {}", w[0]));
+     }
+ 
+     /// The IMU board shares the bus with the servos, so its ID must not collide with one.
+diff --git a/duck-control/src/safety.rs b/duck-control/src/safety.rs
+index 77db56d..c871c60 100644
+--- a/duck-control/src/safety.rs
++++ b/duck-control/src/safety.rs
+@@ -37,7 +37,12 @@ use crate::io::{IoError, JointTargets, RobotIo, Sensors};
+ use crate::model::NUM_JOINTS;
+ use crate::obs::Command;
+ 
+-/// The XL330's position range: one turn, centred, from the count↔radian conversion.
++/// The actuator's position range: one turn, centred, from the count↔radian conversion.
++///
++/// The encoding changed with the servos — the XL330 used 12 bits over one turn, the FeeTech
++/// HLS 15-bit sign-magnitude over 32768 counts — but both express one turn centred on zero,
++/// so the bounds below do not move. What did change is the scale: this is the *servo's*
++/// travel, not a joint limit, and must be re-derived before anything keys a hard limit off it.
+ ///
+ /// This is the *actuator's* travel, not a per-joint anatomical limit — the alpha robot's
+ /// real joint limits live in the MJCF, which is not vendored here. So this catches a policy
+diff --git a/robotd-params/src/registry.rs b/robotd-params/src/registry.rs
+index 6e8019c..60c2783 100644
+--- a/robotd-params/src/registry.rs
++++ b/robotd-params/src/registry.rs
+@@ -101,7 +101,7 @@ const fn feature(key: &'static str, kind: Kind, doc: &'static str) -> Entry {
+ /// Every key, grouped by section, sections in the shipped file's order.
+ pub const REGISTRY: &[Entry] = &[
+     // ── [bus] ────────────────────────────────────────────────────────────────
+-    entry("bus.port", Kind::Text, "Dynamixel serial port device"),
++    entry("bus.port", Kind::Text, "FeeTech serial port device"),
+     // ── [control] ────────────────────────────────────────────────────────────
+     entry("control.hz", Kind::Integer, "Control loop rate"),
+     entry(
+diff --git a/robotd/src/main.rs b/robotd/src/main.rs
+index 1fcfb24..51ae300 100644
+--- a/robotd/src/main.rs
++++ b/robotd/src/main.rs
+@@ -1003,7 +1003,7 @@ async fn main() -> ExitCode {
+ /// Enable torque and ramp to the home pose.
+ #[cfg(target_os = "linux")]
+ fn run_init(params: &Params, duration: Duration) -> ExitCode {
+-    let mut io = match duck_control::bus::DynamixelIo::open(&params.bus.port) {
++    let mut io = match duck_control::bus::FeetechIo::open(&params.bus.port) {
+         Ok(io) => io,
+         Err(e) => {
+             tracing::error!(error = %e, port = %params.bus.port, "cannot open the bus");
+@@ -1132,7 +1132,7 @@ fn spawn_control_thread(
+ 
+ /// The real bus on the board; a fake elsewhere, so `open_bus_waiting` has one signature.
+ #[cfg(target_os = "linux")]
+-type BusIo = duck_control::bus::DynamixelIo;
++type BusIo = duck_control::bus::FeetechIo;
+ #[cfg(not(target_os = "linux"))]
+ type BusIo = FakeIo;
+ 
+@@ -1173,7 +1173,7 @@ fn open_bus(port: &str, attempt: u32) -> Option<BusIo> {
+     // First attempt and every thirtieth — about one line per 30 s while waiting.
+     let loud = attempt == 0 || attempt.is_multiple_of(STARTUP_READ_LOG_EVERY);
+ 
+-    let mut io = match duck_control::bus::DynamixelIo::open(port) {
++    let mut io = match duck_control::bus::FeetechIo::open(port) {
+         Ok(io) => io,
+         Err(e) => {
+             if loud {
+@@ -1263,7 +1263,7 @@ enum Bringup {
+ impl Bringup {
+     /// The interpolated target for this tick, or `None` once the ramp is done.
+     ///
+-    /// Linear, like `DynamixelIo::interpolate_to` which `robotd init` uses — same shape, except this
++    /// Linear, like `FeetechIo::interpolate_to` which `robotd init` uses — same shape, except this
+     /// one is computed per tick instead of blocking the thread, because here the loop is running.
+     fn homing_target(&self, now: Instant) -> Option<[f64; NUM_JOINTS]> {
+         let Bringup::Homing { from, since } = self else {
+diff --git a/robotd/src/soc.rs b/robotd/src/soc.rs
+index 0e25804..b28d248 100644
+--- a/robotd/src/soc.rs
++++ b/robotd/src/soc.rs
+@@ -1,7 +1,7 @@
+ //! What the *board* says about itself, as opposed to what the robot says.
+ //!
+ //! Deliberately not in `duck-control` and not behind [`crate::RobotIo`]: nothing here touches
+-//! the Dynamixel bus. It is a `sysfs` read, so it belongs to the daemon that runs on a Linux
++//! the servo bus. It is a `sysfs` read, so it belongs to the daemon that runs on a Linux
+ //! board rather than to the crate that models a robot — and it keeps working when the motor
+ //! bus does not, which is exactly when a thermal reading is interesting.
+ //!

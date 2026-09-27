@@ -1,0 +1,11 @@
+# build output
+build/
+
+# host tool caches and scratch worktrees (never part of the deliverable)
+.uv-cache/
+.worktree/
+patches/.rusttest/
+__pycache__/
+*.pyc
+.tmp-tests/
+.test-out/

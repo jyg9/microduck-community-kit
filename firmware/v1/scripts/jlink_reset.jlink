@@ -1,0 +1,8 @@
+si SWD
+speed 4000
+Device GD32F303CC
+Connect
+h
+r
+g
+q

@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IMU bench - soft_imu_to_dxl</title>
+<!-- No external dependencies: no CDN, no imports, fully offline. -->
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ===================== control bar ===================== -->
+<header id="controls">
+  <div class="row" id="linkRow">
+    <div class="field">
+      <label for="selPort">Port</label>
+      <select id="selPort" class="w150"><option value="">(loading...)</option></select>
+    </div>
+    <button id="btnRefreshPorts" class="mini" title="Re-read GET /api/ports">Refresh</button>
+
+    <div class="field">
+      <label for="selBaud">Baud</label>
+      <select id="selBaud">
+        <option value="1000000" selected>1000000</option>
+        <option value="500000">500000</option>
+        <option value="921600">921600</option>
+        <option value="115200">115200</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="selProtocol">Protocol</label>
+      <select id="selProtocol">
+        <option value="dxl" selected>Dynamixel 2.0</option>
+        <option value="fee">FeeTech</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="selMode">Read mode</label>
+      <select id="selMode">
+        <option value="sync_read" selected>sync_read</option>
+        <option value="read">read</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="selReadLen">Read len</label>
+      <select id="selReadLen">
+        <option value="12">12</option>
+        <option value="20" selected>20</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="rngRate">Poll rate</label>
+      <input type="range" id="rngRate" min="10" max="200" step="1" value="100">
+      <span class="num" id="lblRate">100 Hz</span>
+    </div>
+
+    <button id="btnConnect" class="primary">Connect</button>
+    <button id="btnPause" disabled>Pause</button>
+
+    <div class="status">
+      <span class="dot off" id="connDot"></span>
+      <span id="connText">disconnected</span>
+      <span class="dim" id="devText">no device</span>
+    </div>
+
+    <button id="btnRecord" class="rec">Record CSV</button>
+    <span class="dim" id="recInfo"></span>
+  </div>
+
+  <div class="row cfg" id="cfgRow">
+    <div class="field">
+      <label for="selSimMode">Sim mode</label>
+      <select id="selSimMode">
+        <option value="static">static</option>
+        <option value="sine">sine</option>
+        <option value="drift">drift</option>
+        <option value="noise">noise</option>
+        <option value="spin">spin</option>
+        <option value="sflp-wait">sflp-wait</option>
+        <option value="frozen">frozen</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="rngAmp">Amplitude</label>
+      <input type="range" id="rngAmp" min="100" max="5000" step="10" value="1000">
+      <span class="num" id="lblAmp">1000</span>
+    </div>
+
+    <div class="field">
+      <label for="rngFreq">Frequency</label>
+      <input type="range" id="rngFreq" min="100" max="5000" step="10" value="1000">
+      <span class="num" id="lblFreq">1000</span>
+    </div>
+
+    <div class="field">
+      <label for="inpBiasX">Bias X</label>
+      <input type="number" id="inpBiasX" class="w62" min="-3000" max="3000" step="1" value="0">
+    </div>
+    <div class="field">
+      <label for="inpBiasY">Bias Y</label>
+      <input type="number" id="inpBiasY" class="w62" min="-3000" max="3000" step="1" value="0">
+    </div>
+    <div class="field">
+      <label for="inpBiasZ">Bias Z</label>
+      <input type="number" id="inpBiasZ" class="w62" min="-3000" max="3000" step="1" value="0">
+    </div>
+
+    <div class="field">
+      <label for="selReportFrame">Frame</label>
+      <select id="selReportFrame">
+        <option value="0" selected>chip</option>
+        <option value="1">trunk</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="selDbgLevel">Debug</label>
+      <select id="selDbgLevel">
+        <option value="0">0</option>
+        <option value="1">1</option>
+        <option value="2" selected>2</option>
+        <option value="3">3</option>
+      </select>
+    </div>
+
+    <button id="btnApply">Apply</button>
+    <button id="btnSave">Save to flash</button>
+    <button id="btnDefaults">Factory defaults</button>
+    <button id="btnReboot">Reboot</button>
+    <button id="btnResetSim">Restart model</button>
+    <span class="dim" id="cfgStatus">cfg: -</span>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+</header>
+
+<!-- ===================== main grid ===================== -->
+<main>
+
+  <!-- 3D attitude -->
+  <section class="panel" id="panel3d">
+    <div class="phead">3D attitude <span class="dim">WebGL, fixed camera</span></div>
+    <div class="pbody">
+      <canvas id="cv3d"></canvas>
+      <div class="overlay" id="ov3d">
+        <div class="ovline">
+          <span class="k">roll</span><span class="v" id="ovRoll">--</span>
+          <span class="k">pitch</span><span class="v" id="ovPitch">--</span>
+          <span class="k">yaw</span><span class="v" id="ovYaw">--</span>
+          <span class="unit">deg</span>
+        </div>
+        <div class="ovline dim">
+          <span class="k">quat</span><span class="v" id="ovQuat">--</span>
+          <span class="k">grav dev</span><span class="v" id="ovGravDev">--</span>
+          <span class="k">frame</span><span class="v" id="ovSrc">--</span>
+        </div>
+        <div class="ovline legend">
+          <span class="sw" style="background:#ff5c5c"></span>X
+          <span class="sw" style="background:#4ade80"></span>Y
+          <span class="sw" style="background:#60a5fa"></span>Z
+          <span class="sw" style="background:#fb923c"></span>gravity (measured)
+          <span class="sw" style="background:#22d3ee"></span>up (world ref)
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- statistics -->
+  <section class="panel" id="panelStats">
+    <div class="phead">Statistics <span class="dim" id="stConn">no data</span></div>
+    <div class="pbody">
+      <div class="nodata" id="statsNoData">NO DATA - not connected</div>
+      <div class="stats-scroll" id="statsRoot"></div>
+    </div>
+  </section>
+
+  <!-- scrolling time series -->
+  <section class="panel" id="panelTs">
+    <div class="phead">
+      Scrolling plots <span class="dim">right to left, 60 fps</span>
+      <span class="spacer"></span>
+      <label class="chk"><input type="checkbox" id="chkLockY"> lock Y</label>
+      <span class="dim">att</span>
+      <input type="number" id="inpAttYMin" class="w62" step="any" disabled placeholder="min">
+      <input type="number" id="inpAttYMax" class="w62" step="any" disabled placeholder="max">
+      <span class="dim">gyro</span>
+      <input type="number" id="inpGyroYMin" class="w62" step="any" disabled placeholder="min">
+      <input type="number" id="inpGyroYMax" class="w62" step="any" disabled placeholder="max">
+    </div>
+    <div class="pbody col">
+      <div class="plotwrap">
+        <canvas id="cvAtt"></canvas>
+        <div class="nodata hidden" id="ndAtt">NO DATA</div>
+      </div>
+      <div class="plotwrap">
+        <canvas id="cvGyro"></canvas>
+        <div class="nodata hidden" id="ndGyro">NO DATA</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- density heat-map waterfall -->
+  <section class="panel" id="panelHeat">
+    <div class="phead">
+      Density waterfall <span class="dim">x = time, y = value bin, brightness = samples per bin</span>
+      <span class="spacer"></span>
+      <label for="selHeatQty">Quantity</label>
+      <select id="selHeatQty">
+        <option value="gyro_x" selected>gyro_x (dps)</option>
+        <option value="gyro_y">gyro_y (dps)</option>
+        <option value="gyro_z">gyro_z (dps)</option>
+        <option value="gravity_x">gravity_x</option>
+        <option value="gravity_y">gravity_y</option>
+        <option value="roll">roll (deg)</option>
+        <option value="pitch">pitch (deg)</option>
+      </select>
+    </div>
+    <div class="pbody">
+      <div class="plotwrap">
+        <canvas id="cvHeat"></canvas>
+        <div class="nodata hidden" id="ndHeat">NO DATA</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- help -->
+  <section class="panel" id="panelHelp">
+    <details id="helpBox">
+      <summary>Help - panel meanings, frames, counters</summary>
+      <div class="help">
+        <p><b>Layout.</b> The control bar talks to the local Python server over
+        <code>GET /api/ports</code> and the WebSocket at <code>/ws</code>. Everything runs offline;
+        the 3D view is a hand-written WebGL1 renderer and the plots are 2D canvas.</p>
+
+        <p><b>3D attitude.</b> The board is 60x40x4 units with the top face coloured and a connector
+        nub; the axes are body-frame X (red), Y (green), Z (blue). A fixed camera with a ground grid
+        and a faint wire sphere shows orientation without ambiguity. The orientation comes from the
+        <code>quat</code> field (trunk attitude, w,x,y,z, already mount-corrected); it is normalised
+        before the rotation matrix is built, and the rotation is applied as an active body-to-world
+        transform in a Z-up world, so an identity quaternion means "board flat, +Z up".</p>
+
+        <p><b>Gravity and up.</b> The <code>gravity</code> sample field is the gravity direction
+        expressed in the <i>trunk</i> frame. The 3D view rotates it into the world frame, where it
+        must point along world -Z; the orange arrow is that measured gravity and the cyan arrow is the
+        fixed world up (+Z) reference. "grav dev" is the angle between them in degrees - it stays near
+        0 when the attitude is consistent with the accelerometer and grows if the fusion drifts or the
+        mounting correction is wrong.</p>
+
+        <p><b>Orientation trace.</b> The faint line is the trail of where the board +Z axis has pointed
+        on the unit sphere (about 9 s of history). A tight dot means a stable board; a growing band or
+        scatter means jitter, vibration or yaw drift.</p>
+
+        <p><b>Board settings.</b> The simulation source is selected by <i>sim mode</i>
+        (static, sine, drift, noise, spin, sflp-wait, frozen); <i>amplitude</i> and
+        <i>frequency</i> are per-mille values (1000 = 1.000 in the board's own units), the gyro
+        bias is in raw counts, <i>frame</i> selects whether the node reports the chip or the
+        trunk frame and <i>debug</i> is the firmware log level. "Apply" writes the current form,
+        "Save to flash" writes and then commands a flash save, and the remaining buttons send the
+        factory-defaults, reboot and restart-model commands.</p>
+
+        <p><b>Frames.</b> <code>gyro</code> is the raw chip gyro in deg/s, <code>gyro_trunk_dps</code>
+        is the same vector rotated into the trunk frame by the mount correction, and
+        <code>gravity</code> is also in the trunk frame. The board "frame" setting selects whether the
+        node reports the chip frame or the trunk frame; the host always receives both gyro variants so
+        the plots stay comparable.</p>
+
+        <p><b>Scrolling plots.</b> Two stacked time series (attitude roll/pitch/yaw in deg and gyro
+        x/y/z in deg/s) scroll right to left over a 6 s window, drawn on
+        <code>requestAnimationFrame</code>. The y axis autoscales (it expands instantly and relaxes
+        slowly); "lock Y" freezes it to the entered min/max so offsets are comparable between runs. A
+        gap in a trace means samples were missing over that interval, and the bright vertical line at
+        the right edge is the moving time cursor (now).</p>
+
+        <p><b>Density waterfall.</b> The heat map is drawn pixel by pixel on a canvas: x is time
+        (40 columns per second, right edge = now, about 13 s of history), y is the value of the
+        selected quantity binned into rows, and colour intensity is the number of samples that landed
+        in a bin during that time column (normalised per column, square-root boosted, so the shape of
+        the distribution stays visible). It makes gyro noise floors, quantisation steps and slow
+        offsets visible as bands that march up or down - the classic jitter/drift view. Out-of-range
+        values are clamped to the edge bins and the range slowly adapts to the data.</p>
+
+        <p><b>Statistics.</b> Per axis for gyro (deg/s) and gravity (unit vector): mean, standard
+        deviation, peak-to-peak, least-squares drift slope (units per second, fitted on the buffered
+        window) and min/max. Drift is the slope of a straight-line fit <code>v(t) = a + b*t</code>, so
+        b is reported per second; a persistent non-zero slope is an offset/thermal drift indicator.
+        Link numbers come from the server: achieved poll rate, median/p95/min/max round-trip latency,
+        timeout count, bad frames (CRC/parse errors) and extra bytes on the bus.</p>
+
+        <p><b>Counters.</b> "missing samples" counts gaps in the board sample counter (counter
+        continuity), "stale run" is the current number of consecutive polls where the board returned
+        the <i>identical</i> telemetry block - stale means no new conversion, so a long run points at a
+        frozen sensor, a wrong read rate or a cached register - and "stale max" is the worst run seen
+        since the last connect. Raw flags are decoded to names such as <code>sflp_valid</code>,
+        <code>gyro_sat</code>, <code>sensor_err</code>, <code>simulated</code> or
+        <code>frozen</code>.</p>
+
+        <p><b>Recording.</b> "Record CSV" buffers every received sample in the browser; pressing it
+        again stops and downloads a CSV with time, euler, quaternion (corrected and raw), both gyro
+        frames, gravity, accel, counters, flags and latency.</p>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

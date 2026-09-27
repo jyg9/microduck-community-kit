@@ -1,0 +1,20 @@
+[project]
+name = "hls-servo-debugger"
+version = "1.0.0"
+description = "Browser based debugger for Feetech HLS serial bus servos"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "Flask>=2.2,<3.0",
+    "pyserial>=3.5",
+]
+
+[project.scripts]
+hls-debugger = "hls_debugger.server:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["hls_debugger*"]

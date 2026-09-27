@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>飞特 HLS 舵机调试工具</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">FT</span>
+    <div>
+      <div class="brand-title">HLS 舵机调试工具</div>
+      <div class="brand-sub">FT-SCS / HLS 串行总线协议 · 浏览器版</div>
+    </div>
+  </div>
+  <div class="top-status">
+    <span id="connDot" class="dot dot-off"></span>
+    <span id="connText">未连接</span>
+    <span id="connMeta" class="muted"></span>
+  </div>
+  <div class="top-actions">
+    <button id="btnTopDisconnect" class="btn btn-ghost" disabled>断开</button>
+    <span id="appHint" class="muted">默认 /dev/ttyACM1 @ 1 Mbps，舵机 ID 1</span>
+  </div>
+</header>
+
+<div class="app-shell">
+  <aside class="sidebar">
+    <button class="nav-item active" data-tab="connection"><span>01</span>连接与扫描</button>
+    <button class="nav-item" data-tab="feedback"><span>02</span>实时反馈</button>
+    <button class="nav-item" data-tab="position"><span>03</span>位置控制</button>
+    <button class="nav-item" data-tab="speed"><span>04</span>速度 / 电流 / PWM</button>
+    <button class="nav-item" data-tab="params"><span>05</span>参数配置</button>
+    <button class="nav-item" data-tab="sync"><span>06</span>同步读写</button>
+    <button class="nav-item" data-tab="advanced"><span>07</span>寄存器 / 原始指令</button>
+    <button class="nav-item" data-tab="memory"><span>08</span>内存表参考</button>
+    <div class="sidebar-foot">
+      <div>协议来源：<code>飞特通讯协议</code></div>
+      <div>参考实现：<code>HLSCL.cpp / SCS.cpp</code></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <!-- 01 连接与扫描 -->
+    <section id="tab-connection" class="tab-panel active">
+      <div class="grid-2">
+        <div class="card">
+          <h2>串口连接</h2>
+          <div class="form-grid">
+            <label>串口设备
+              <span class="inline-control">
+                <select id="portSelect"></select>
+                <button id="btnRefreshPorts" class="btn btn-small">刷新</button>
+              </span>
+            </label>
+            <label>波特率
+              <select id="baudSelect"></select>
+            </label>
+            <label>事务超时 (ms)
+              <input id="timeoutMs" type="number" value="100" min="10" max="5000" step="10">
+            </label>
+          </div>
+          <div class="button-row">
+            <button id="btnConnect" class="btn btn-primary">连接</button>
+            <button id="btnAutoDetect" class="btn">自动探测 ID1</button>
+            <button id="btnDisconnect" class="btn btn-danger" disabled>断开</button>
+          </div>
+          <div class="hint">
+            连接后所有 API 操作共用同一串口。HLS 出厂默认为 <b>1 Mbps</b>、ID <b>1</b>；
+            如果之前改过波特率/ID，可先使用“自动探测 ID1”或逐个扫描。
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Ping / ID 扫描</h2>
+          <div class="form-grid">
+            <label>舵机 ID
+              <input id="pingId" type="number" value="1" min="0" max="253">
+            </label>
+            <label>Ping 超时 (ms)
+              <input id="pingTimeoutMs" type="number" value="80" min="10" max="2000">
+            </label>
+          </div>
+          <div class="button-row">
+            <button id="btnPing" class="btn btn-primary">Ping</button>
+            <button id="btnReadVersion" class="btn">读取版本</button>
+          </div>
+          <hr>
+          <div class="form-grid">
+            <label>扫描起始 ID
+              <input id="scanStart" type="number" value="0" min="0" max="253">
+            </label>
+            <label>扫描结束 ID
+              <input id="scanEnd" type="number" value="253" min="0" max="253">
+            </label>
+          </div>
+          <div class="button-row">
+            <button id="btnScan" class="btn btn-primary">开始扫描</button>
+            <button id="btnScanWithVersion" class="btn">扫描并读版本</button>
+          </div>
+          <div id="scanResult" class="result-box muted">尚未扫描。默认全总线 0~253（每个无应答 ID 等 40 ms，约 10 秒）；只关心低 ID 时可把结束 ID 改小。</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>快速上手</h2>
+        <ol class="steps">
+          <li>确认舵机供电，串口设备为 <code>/dev/ttyACM1</code>，默认波特率先选 <b>1 Mbps</b>。</li>
+          <li>点击 <b>连接</b>，再点击 <b>Ping</b>；如果失败，依次尝试 115200、500000、250000、57600、38400。</li>
+          <li>到 <b>实时反馈</b> 读取当前位置、速度、电压、温度等状态。</li>
+          <li>到 <b>位置控制</b> 先打开扭矩，再写目标位置。</li>
+        </ol>
+        <div class="hint warn">
+          舵机运行时注意机械安全：初始测试建议使用较低的加速度/速度/电流，并确保有可断开电源的方式。
+        </div>
+      </div>
+    </section>
+
+    <!-- 02 实时反馈 -->
+    <section id="tab-feedback" class="tab-panel">
+      <div class="card">
+        <div class="card-head">
+          <h2>实时反馈（56~70，一次读全状态）</h2>
+          <div class="button-row compact">
+            <label class="inline-label">ID <input id="feedbackId" type="number" value="1" min="0" max="253"></label>
+            <label class="inline-label">轮询(ms) <input id="pollInterval" type="number" value="500" min="50" max="10000" step="50"></label>
+            <button id="btnPollStart" class="btn btn-primary">开始轮询</button>
+            <button id="btnPollStop" class="btn" disabled>停止</button>
+            <button id="btnReadFeedback" class="btn">读取一次</button>
+          </div>
+        </div>
+
+        <div class="metrics" id="feedbackMetrics">
+          <div class="metric"><div class="metric-label">当前位置</div><div class="metric-value" id="fbPos">--</div><div class="metric-sub" id="fbPosSub">0.087°/计数</div></div>
+          <div class="metric"><div class="metric-label">当前速度</div><div class="metric-value" id="fbSpeed">--</div><div class="metric-sub" id="fbSpeedSub">0.732 RPM/计数</div></div>
+          <div class="metric"><div class="metric-label">当前负载</div><div class="metric-value" id="fbLoad">--</div><div class="metric-sub">占空比</div></div>
+          <div class="metric"><div class="metric-label">电压</div><div class="metric-value" id="fbVoltage">--</div><div class="metric-sub">0.1 V/计数</div></div>
+          <div class="metric"><div class="metric-label">温度</div><div class="metric-value" id="fbTemp">--</div><div class="metric-sub">°C</div></div>
+          <div class="metric"><div class="metric-label">电流</div><div class="metric-value" id="fbCurrent">--</div><div class="metric-sub">6.5 mA/计数</div></div>
+          <div class="metric"><div class="metric-label">移动标志</div><div class="metric-value" id="fbMoving">--</div><div class="metric-sub">BIT0 运动 / BIT1 到达</div></div>
+          <div class="metric"><div class="metric-label">舵机状态</div><div class="metric-value" id="fbStatus">--</div><div class="metric-sub">BIT0~3：电压/编码/温度/电流</div></div>
+        </div>
+
+        <div class="chart-wrap">
+          <canvas id="feedbackChart" width="900" height="220"></canvas>
+          <div class="chart-legend">
+            <span class="legend pos">位置</span>
+            <span class="legend speed">速度</span>
+            <span class="legend current">电流</span>
+            <span class="muted" id="chartInfo">最多保留 160 个采样点</span>
+          </div>
+        </div>
+        <div id="feedbackRaw" class="mono result-box">原始反馈：--</div>
+      </div>
+    </section>
+
+    <!-- 03 位置控制 -->
+    <section id="tab-position" class="tab-panel">
+      <div class="card">
+        <div class="card-head">
+          <h2>运行模式与扭矩</h2>
+          <label class="inline-label">ID <input id="posId" type="number" value="1" min="0" max="253"></label>
+        </div>
+        <div class="button-row">
+          <button class="btn mode-btn active" data-pos-mode="0">位置伺服 (0)</button>
+          <button class="btn mode-btn" data-pos-mode="1">恒速 (1)</button>
+          <button class="btn mode-btn" data-pos-mode="2">恒流 (2)</button>
+          <button class="btn mode-btn" data-pos-mode="3">PWM 开环 (3)</button>
+          <button class="btn mode-btn" data-pos-mode="4" title="新固件位置模式；厂商内存表注明“位置模式 0 与模式 4 生效”">位置 (4)</button>
+        </div>
+        <div class="button-row">
+          <button class="btn" id="btnTorqueOn">打开扭矩</button>
+          <button class="btn" id="btnTorqueOff">关闭扭矩</button>
+          <button class="btn" id="btnTorqueDamp">阻尼输出 (2)</button>
+          <button class="btn" id="btnServoMode">切换到位置模式</button>
+        </div>
+        <p class="hint warn">注意：写目标位置会被固件自动打开扭矩（实测本机行为）。
+          要彻底卸力，请在最后一次位置写入之后再点“关闭扭矩”。</p>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h2>目标位置</h2>
+          <label>位置原始值（0.087°，BIT15 方向）
+            <input id="posValue" type="number" value="2048" min="-32767" max="32767">
+          </label>
+          <input id="posSlider" type="range" min="-4095" max="4095" value="2048" step="1">
+          <div class="form-grid">
+            <label>速度原始值
+              <input id="moveSpeed" type="number" value="60" min="0" max="65535">
+            </label>
+            <label>加速度原始值
+              <input id="moveAcc" type="number" value="30" min="0" max="254">
+            </label>
+            <label>目标电流/扭矩原始值
+              <input id="moveTorque" type="number" value="300" min="0" max="65535">
+            </label>
+          </div>
+          <div class="derived" id="moveDerived">速度 = 43.9 RPM，加速度 = 261 °/s²</div>
+          <div class="button-row">
+            <button id="btnMove" class="btn btn-primary">立即写位置</button>
+            <button id="btnRegMove" class="btn">异步写位置</button>
+            <button id="btnRegAction" class="btn">执行异步写</button>
+          </div>
+          <div class="button-row">
+            <button id="btnReadGoalPos" class="btn">回读目标位置</button>
+            <button id="btnUsePresentPos" class="btn">使用当前位置</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>位置相关设置</h2>
+          <div class="form-grid">
+            <label>最小角度限制（原始值）
+              <input id="minAngle" type="number" value="0" min="0" max="4094">
+            </label>
+            <label>最大角度限制（原始值）
+              <input id="maxAngle" type="number" value="4095" min="1" max="4095">
+            </label>
+            <label>转矩限制（0.1%）
+              <input id="torqueLimit" type="number" value="500" min="0" max="1000">
+            </label>
+          </div>
+          <div class="button-row">
+            <button id="btnWriteAngleLimits" class="btn">写入角度限制</button>
+            <button id="btnWriteTorqueLimit" class="btn">写入转矩限制</button>
+            <button id="btnCalibrate" class="btn btn-danger">中位校准（CAL）</button>
+          </div>
+          <div class="hint warn">
+            “中位校准”会关闭扭矩、关闭写入锁并执行 CAL 指令，把当前位置写为位置偏移中点。请先固定好机械零位。
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 04 速度 / 电流 / PWM -->
+    <section id="tab-speed" class="tab-panel">
+      <div class="card">
+        <div class="card-head">
+          <h2>恒速 / 恒流 / PWM 控制</h2>
+          <label class="inline-label">ID <input id="speedId" type="number" value="1" min="0" max="253"></label>
+        </div>
+        <div class="button-row">
+          <button class="btn" id="btnWheelMode">切换到恒速模式 (1)</button>
+          <button class="btn" id="btnEleMode">切换到恒流模式 (2)</button>
+          <button class="btn" id="btnPwmMode">切换到 PWM 模式 (3)</button>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h2>恒速模式 (mode=1)</h2>
+          <div class="form-grid">
+            <label>速度原始值（0.732 RPM，BIT15 方向）
+              <input id="wheelSpeed" type="number" value="60" min="-32767" max="32767">
+            </label>
+            <label>加速度原始值
+              <input id="wheelAcc" type="number" value="30" min="0" max="254">
+            </label>
+            <label>目标电流原始值（6.5 mA）
+              <input id="wheelTorque" type="number" value="300" min="0" max="65535">
+            </label>
+          </div>
+          <div class="derived" id="wheelDerived">速度 = 43.9 RPM，加速度 = 261 °/s²</div>
+          <div class="button-row">
+            <button id="btnWheelWrite" class="btn btn-primary">写入速度</button>
+            <button id="btnWheelStop" class="btn">速度 0 停止</button>
+            <button id="btnWheelReg" class="btn">异步写速度</button>
+            <button id="btnWheelAction" class="btn">执行异步写</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>恒流 / PWM</h2>
+          <div class="form-grid">
+            <label>恒流模式目标电流原始值（6.5 mA，BIT15 方向）
+              <input id="eleTorque" type="number" value="300" min="-32767" max="32767">
+            </label>
+            <label>PWM 开环值（-1000~1000，BIT10 方向）
+              <input id="pwmValue" type="number" value="300" min="-1000" max="1000">
+            </label>
+          </div>
+          <div class="derived" id="eleDerived">电流 = 1950 mA</div>
+          <div class="button-row">
+            <button id="btnEleWrite" class="btn btn-primary">写入恒流目标</button>
+            <button id="btnPwmWrite" class="btn btn-primary">写入 PWM 值</button>
+            <button id="btnEleStop" class="btn">电流 0</button>
+          </div>
+          <div class="hint">
+            运行模式说明：0 位置伺服 / 1 恒速 / 2 恒流 / 3 PWM 开环。模式切换本质是写 33 号寄存器。
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 05 参数配置 -->
+    <section id="tab-params" class="tab-panel">
+      <div class="card">
+        <div class="card-head">
+          <h2>内存表参数配置</h2>
+          <div class="button-row compact">
+            <label class="inline-label">ID <input id="paramId" type="number" value="1" min="0" max="253"></label>
+            <button id="btnReadAllMemory" class="btn btn-primary">读取 0~86 全部</button>
+            <button id="btnReadAllParams" class="btn">逐组读取</button>
+          </div>
+        </div>
+        <div class="hint">
+          读取/写入按内存表字段自动编码；只读字段不能写。修改 EPROM（5~39）前建议先关闭扭矩并按需关闭写入锁。
+        </div>
+        <div id="paramGroups"></div>
+      </div>
+    </section>
+
+    <!-- 06 同步读写 -->
+    <section id="tab-sync" class="tab-panel">
+      <div class="card">
+        <h2>同步读（SYNC_READ，0x82）</h2>
+        <div class="form-grid">
+          <label>ID 列表（逗号分隔）
+            <input id="syncReadIds" value="1">
+          </label>
+          <label>起始地址
+            <input id="syncReadAddr" type="number" value="56" min="0" max="255">
+          </label>
+          <label>读取长度
+            <input id="syncReadLen" type="number" value="15" min="1" max="250">
+          </label>
+        </div>
+        <div class="button-row">
+          <button id="btnSyncRead" class="btn btn-primary">同步读</button>
+          <button id="btnSyncReadFeedback" class="btn">同步读全部反馈（56,15）</button>
+        </div>
+        <div id="syncReadResult" class="result-box mono">结果将显示在这里。</div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h2>同步位置写（SYNC_WRITE，模式 0）</h2>
+          <label>ID 列表（逗号分隔）<input id="syncMoveIds" value="1,2,3"></label>
+          <label>目标位置列表（逗号分隔）<input id="syncMovePositions" value="2048,2048,2048"></label>
+          <div class="form-grid">
+            <label>速度列表<input id="syncMoveSpeeds" value="60,60,60"></label>
+            <label>加速度列表<input id="syncMoveAccs" value="30,30,30"></label>
+            <label>目标电流列表<input id="syncMoveTorques" value="300,300,300"></label>
+          </div>
+          <div class="button-row">
+            <button id="btnSyncMove" class="btn btn-primary">发送同步位置写</button>
+          </div>
+          <div class="hint">同步写广播无应答；列表长度及每项类型必须匹配。</div>
+        </div>
+
+        <div class="card">
+          <h2>同步速度写（SYNC_WRITE，模式 1）</h2>
+          <label>ID 列表（逗号分隔）<input id="syncWheelIds" value="1,2,3"></label>
+          <label>速度列表（0.732 RPM）<input id="syncWheelSpeeds" value="60,60,60"></label>
+          <div class="form-grid">
+            <label>加速度列表<input id="syncWheelAccs" value="30,30,30"></label>
+            <label>目标电流列表<input id="syncWheelTorques" value="300,300,300"></label>
+          </div>
+          <div class="button-row">
+            <button id="btnSyncWheel" class="btn btn-primary">发送同步速度写</button>
+            <button id="btnBroadcastAction" class="btn">广播执行异步写</button>
+          </div>
+          <div class="hint">同步速度写需要所有舵机先处于恒速模式(1)，且速度项长度一致。</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 07 高级指令 -->
+    <section id="tab-advanced" class="tab-panel">
+      <div class="grid-2">
+        <div class="card">
+          <h2>通用读 / 写</h2>
+          <div class="form-grid">
+            <label>ID <input id="advId" type="number" value="1" min="0" max="253"></label>
+            <label>地址<input id="advAddr" type="number" value="0" min="0" max="255"></label>
+            <label>长度<input id="advLen" type="number" value="2" min="1" max="250"></label>
+          </div>
+          <div class="button-row">
+            <button id="btnAdvRead" class="btn btn-primary">READ</button>
+          </div>
+          <label>写入数据（十六进制，如 <code>00</code> 或 <code>01 02 03</code>）
+            <input id="advWriteData" value="00">
+          </label>
+          <div class="button-row">
+            <button id="btnAdvWrite" class="btn">WRITE</button>
+            <button id="btnAdvRegWrite" class="btn">REG_WRITE</button>
+            <button id="btnAdvRegAction" class="btn">REG_ACTION</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>原始帧收发</h2>
+          <label>发送十六进制
+            <textarea id="rawTx" rows="4" placeholder="FF FF 01 02 01 FC"></textarea>
+          </label>
+          <div class="form-grid">
+            <label>接收等待 (ms)<input id="rawWait" type="number" value="100" min="1" max="10000"></label>
+          </div>
+          <div class="button-row">
+            <button id="btnRawSend" class="btn btn-primary">发送原始帧</button>
+            <button id="btnRawPing" class="btn">生成并发送 PING</button>
+          </div>
+          <div id="rawResult" class="result-box mono">接收数据显示在这里。</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>特殊指令</h2>
+        <div class="button-row">
+          <button id="btnAdvReset" class="btn btn-danger">RESET 恢复出厂 (0x0A)</button>
+          <button id="btnAdvRecovery" class="btn">RECOVERY (0x06)</button>
+          <button id="btnAdvCal" class="btn btn-danger">CAL 中位校准 (0x0B)</button>
+          <button id="btnAdvLock" class="btn">写锁标志 1</button>
+          <button id="btnAdvUnlock" class="btn">解锁并保存 EPROM</button>
+        </div>
+        <div id="advCommandResult" class="result-box mono">指令结果将显示在这里。</div>
+      </div>
+    </section>
+
+    <!-- 08 内存表参考 -->
+    <section id="tab-memory" class="tab-panel">
+      <div class="card">
+        <div class="card-head">
+          <h2>HLS 内存表参考</h2>
+          <span class="muted">多字节字段低位在前；位置 4096 计数/圈（0.087°/计数）</span>
+        </div>
+        <div id="memoryTableWrap" class="table-wrap"></div>
+      </div>
+      <div class="card">
+        <h2>常见换算</h2>
+        <div class="kv-grid">
+          <div><b>位置</b><br>1 计数 = 0.087°；4096 计数 = 360°</div>
+          <div><b>速度</b><br>1 计数 = 0.732 RPM</div>
+          <div><b>负载</b><br>1 计数 = 0.1% 占空比，BIT10 为方向位</div>
+          <div><b>电流</b><br>1 计数 = 6.5 mA，BIT15 为方向位</div>
+          <div><b>电压</b><br>1 计数 = 0.1 V</div>
+          <div><b>加速度</b><br>1 计数 = 8.7 °/s²，0 = 最大加速度</div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="log-panel">
+  <div class="log-head">
+    <b>运行日志</b>
+    <span id="logStatus" class="muted">未连接</span>
+    <span class="spacer"></span>
+    <button id="btnLogRefresh" class="btn btn-small">刷新</button>
+    <button id="btnLogClear" class="btn btn-small">清空</button>
+  </div>
+  <div id="logList" class="log-list mono"></div>
+</div>
+
+<div id="toast" class="toast"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

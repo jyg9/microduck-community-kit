@@ -1,0 +1,3 @@
+[submodule "firmware/GD32F30x_Firmware_Library"]
+	path = firmware/GD32F30x_Firmware_Library
+	url = https://github.com/GigaDevice-GD32-MCU/GD32F30x_Firmware_Library.git
