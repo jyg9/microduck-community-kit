@@ -22,7 +22,7 @@ host/
 
 ## 1. 依赖
 
-只需要 `pyserial` 与 `aiohttp`（Python 3.10+）。仓库已有的虚拟环境：
+只需要 `pyserial` 与 `aiohttp`（Python 3.10+）：
 
 ```bash
 # 已安装，可直接用：
