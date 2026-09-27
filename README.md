@@ -1,6 +1,7 @@
 # 用于Microduck复刻的一些PCB补充
 
 > 这不是官方Microduck仓库，<a href="https://github.com/pollen-robotics/microduck">官方仓库</a>在这里，感谢他们开源。本项目是复刻所需硬件PCB补充。
+
 主要包括：
 - **imu_to_dxl**：<a href="hardware/imu_to_dxl">身体传感器板</a>、<a href="firmware/v1">对应的固件</a>和<a href="firmware/v1/host">上位机测试软件</a>
 - **banana_pcb**：<a href="hardware/banana_pcb">电池上方的转接小板</a>，需要引出正负电源线焊接到下面dxl_hub板子上。
@@ -16,5 +17,5 @@ git clone --recurse-submodules https://github.com/jyg9/microduck-community-kit.g
  - 项目使用了飞特舵机1910，同时兼容原版XL330
  - 不是最终版本。目前我的外壳还没到，未组装整机调试，后续可能会有更新
  - 本项目在Linux平台开发，不能保证其他平台兼容性
- - 硬件是纯手工绘制，软件由AI编写
+ - 硬件是纯手工绘制，软件全部由AI编写和调试
  - imu_to_dxl样品委外贴片+物料成本接近1千元，还剩余一些imu_to_dxl，如有需要可在<a href="https://item.taobao.com/item.htm?ft=t&id=1085185543605">我的店铺购</a>买，一起分摊一下开发成本，谢谢。
