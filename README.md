@@ -9,6 +9,7 @@
 - **飞特舵机调试软件**：<a href="software/hls_servo_debugger">飞特舵机调试软件</a>
 
 接线图：
+```text
                           🦆 MicroDuck 头部 (Head)
                                 │
                                 │ 1x 舵机线 (向下)
@@ -31,6 +32,7 @@
  │ imu_to_dxl    │==============┘
  │ (跨部内，仿舵机小板) 
  └───────────────┘
+```
 
 如需要编译固件，克隆的时候需要增加--recurse-submodules参数，否则不会下载GDLib：
 ```bash
