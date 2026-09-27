@@ -2,7 +2,7 @@
 
 > "imu_to_dxl"固定在电池背面，提供精确的机器鸭身体姿态反馈数据
 
-<img src="./docs/img/1.png" alt="3d view" width="400"/>
+<img src="./docs/1.png" alt="3d view" width="400"/>
 
 功能如下：
 - **供电电压**：6~24V
