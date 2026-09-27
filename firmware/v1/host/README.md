@@ -25,8 +25,15 @@ host/
 只需要 `pyserial` 与 `aiohttp`（Python 3.10+）：
 
 ```bash
+# 在v1目录下执行
+uv venv --python 3.12 
+source .venv/bin/activate
+uv pip install pyserial aiohttp
+./build.sh host
+
 # 已安装，可直接用：
-uv python host/server.py --help
+source .venv/bin/activate
+./build.sh host
 ```
 
 C 测试只需要 `gcc`；协议自检 `bus.py` 在缺 pyserial 时也能跑（只有实链路部分需要它）。

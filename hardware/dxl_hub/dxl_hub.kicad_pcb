@@ -850,7 +850,7 @@
 				)
 			)
 		)
-		(property "Value" "cape"
+		(property "Value" "1000uF/10V固态"
 			(at 0.0381 4.9666 90)
 			(layer "F.Fab")
 			(uuid "183a73b9-5203-4116-af04-ed49183f682a")

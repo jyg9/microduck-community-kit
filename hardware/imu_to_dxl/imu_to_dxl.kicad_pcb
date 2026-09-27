@@ -22838,7 +22838,7 @@
 				)
 			)
 		)
-		(property "Value" "B3B-PH-K-S(LF)(SN)"
+		(property "Value" "~"
 			(at 0.03 2.662 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -22966,6 +22966,7 @@
 		(path "/60fadb95-6968-489d-84f9-819dc33fc0ed")
 		(sheetname "/")
 		(sheetfile "imu_to_dxl.kicad_sch")
+		(attr exclude_from_bom dnp)
 		(fp_line
 			(start -4 -1.6)
 			(end 4 -1.6)
@@ -25722,7 +25723,7 @@
 				)
 			)
 		)
-		(property "Value" "B3B-EH-A (LF)(SN)"
+		(property "Value" "~"
 			(at 0.0251 3.162 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -25850,6 +25851,7 @@
 		(path "/7903a704-adf6-4821-bc28-d82dc48741f7")
 		(sheetname "/")
 		(sheetfile "imu_to_dxl.kicad_sch")
+		(attr exclude_from_bom dnp)
 		(fp_line
 			(start -4.9999 -1.6001)
 			(end -4.9999 2.2)
@@ -28019,7 +28021,7 @@
 				)
 			)
 		)
-		(property "Manufacturer Part" "JK-SMD0603-002"
+		(property "Manufacturer Part" "JK-SMD0603-001"
 			(at 0 0 270)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -28071,7 +28073,7 @@
 				)
 			)
 		)
-		(property "LCSC Part" "C1884486"
+		(property "LCSC Part" "C2687114"
 			(at 0 0 270)
 			(unlocked yes)
 			(layer "F.Fab")
