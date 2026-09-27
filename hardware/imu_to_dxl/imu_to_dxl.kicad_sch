@@ -5043,16 +5043,6 @@
 		)
 		(uuid "d41f3e11-cd0d-4474-9f5f-23efbf77362e")
 	)
-	(text "改为JK-SMD0603-001"
-		(exclude_from_sim no)
-		(at 89.662 31.75 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-		)
-		(uuid "ddfa9d78-55f9-45bf-94df-01f16c390e75")
-	)
 	(junction
 		(at 76.2 29.21)
 		(diameter 0)
@@ -8080,7 +8070,7 @@
 				(hide yes)
 			)
 		)
-		(property "Manufacturer Part" "JK-SMD0603-002"
+		(property "Manufacturer Part" "JK-SMD0603-001"
 			(at 87.63 29.21 0)
 			(effects
 				(font
@@ -8098,7 +8088,7 @@
 				(hide yes)
 			)
 		)
-		(property "LCSC Part" "C1884486"
+		(property "LCSC Part" "C2687114"
 			(at 87.63 29.21 0)
 			(effects
 				(font
