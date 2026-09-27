@@ -238,11 +238,14 @@
         the 3D view is a hand-written WebGL1 renderer and the plots are 2D canvas.</p>
 
         <p><b>3D attitude.</b> The board is 60x40x4 units with the top face coloured and a connector
-        nub; the axes are body-frame X (red), Y (green), Z (blue). A fixed camera with a ground grid
-        and a faint wire sphere shows orientation without ambiguity. The orientation comes from the
-        <code>quat</code> field (trunk attitude, w,x,y,z, already mount-corrected); it is normalised
-        before the rotation matrix is built, and the rotation is applied as an active body-to-world
-        transform in a Z-up world, so an identity quaternion means "board flat, +Z up".</p>
+        nub; the axes are board-frame X (red), Y (green), Z (blue). A fixed camera with a ground grid
+        and a faint wire sphere shows orientation without ambiguity. The rotation comes from the
+        <code>quat</code> field (trunk attitude, w,x,y,z, already mount-corrected) composed with the
+        fixed mounting rotation <code>BOARD_MOUNT</code> (chip +Z = trunk +X), so what you see is the
+        board in its real mounted attitude: a correctly mounted board stands <i>vertical</i> (PCB
+        plane = trunk Y-Z), it is not drawn flat. An identity orientation means the <i>trunk</i> is
+        level, which for this mounting puts the board upright on its edge with chip +X pointing down.
+        The gravity arrow and the trace stay in the trunk frame, so they are not double-rotated.</p>
 
         <p><b>Gravity and up.</b> The <code>gravity</code> sample field is the gravity direction
         expressed in the <i>trunk</i> frame. The 3D view rotates it into the world frame, where it
@@ -251,9 +254,9 @@
         0 when the attitude is consistent with the accelerometer and grows if the fusion drifts or the
         mounting correction is wrong.</p>
 
-        <p><b>Orientation trace.</b> The faint line is the trail of where the board +Z axis has pointed
-        on the unit sphere (about 9 s of history). A tight dot means a stable board; a growing band or
-        scatter means jitter, vibration or yaw drift.</p>
+        <p><b>Orientation trace.</b> The faint line is the trail of where the <i>trunk</i> +Z axis has
+        pointed on the unit sphere (about 9 s of history). A tight dot means a stable board; a growing
+        band or scatter means jitter, vibration or yaw drift.</p>
 
         <p><b>Board settings.</b> The simulation source is selected by <i>sim mode</i>
         (static, sine, drift, noise, spin, sflp-wait, frozen); <i>amplitude</i> and

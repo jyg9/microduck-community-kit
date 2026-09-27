@@ -323,6 +323,15 @@ Geom.prototype.data = function () {
   return { pos: new Float32Array(this.pos), col: new Float32Array(this.col), count: this.pos.length / 3 };
 };
 
+// The board is mounted so that trunk = [+raw_z, +raw_y, -raw_x]: chip +Z = trunk +X
+// (a +90 degree rotation about Y), chip +X = trunk -Z, chip +Y = trunk +Y.  Same
+// constant as microduck's SflpDecoder::DEFAULT_MOUNT and host/bus.py's DEFAULT_MOUNT.
+// The board mesh below is authored flat in the board's own frame (PCB in local X-Y,
+// normal +Z), so it has to be pre-rotated by this or a correctly mounted vertical
+// board renders horizontal.  Never fold this into the gravity arrow or the trace --
+// those are trunk-frame quantities and would get the rotation twice.
+var BOARD_MOUNT = [Math.SQRT1_2, 0, Math.SQRT1_2, 0];
+
 function BoardView(canvas) {
   this.canvas = canvas;
   this.gl = null;
@@ -476,8 +485,12 @@ BoardView.prototype.draw = function (sample, seq) {
   this.drawBuffer('world', vp, 0.85);
   this.drawBuffer('up', vp, 0.95);
 
-  // body model: rotate the board by the trunk attitude
-  var model = (sample && sample.quat) ? quatToMat4(sample.quat) : quatToMat4([1, 0, 0, 0]);
+  // trunk attitude (bus.py already applied the mount correction).  Gravity is a
+  // trunk-frame quantity, so the gravity arrow and the +Z trace keep using this one.
+  var trunkModel = (sample && sample.quat) ? quatToMat4(sample.quat) : quatToMat4([1, 0, 0, 0]);
+  // board model: trunk attitude * chip->trunk mount, because the mesh is authored in
+  // the board's own frame.  Without BOARD_MOUNT a vertical board draws as flat.
+  var model = mat4Mul(trunkModel, quatToMat4(BOARD_MOUNT));
   var mvp = mat4Mul(vp, model);
   this.drawBuffer('board', mvp, 1.0);
   this.drawBuffer('bodylines', mvp, 1.0);
@@ -487,15 +500,15 @@ BoardView.prototype.draw = function (sample, seq) {
   var orange = hex2rgb('#fb923c'), traceC = hex2rgb('#38bdf8');
   var tipWorld = [0, 0, 0];
   if (sample) {
-    var zAxis = mat4Rotate(model, [0, 0, 1]);
+    var zAxis = mat4Rotate(trunkModel, [0, 0, 1]);
     tipWorld = [zAxis[0] * SPHERE_R, zAxis[1] * SPHERE_R, zAxis[2] * SPHERE_R];
     if (seq !== this.traceSeq) { this.traceSeq = seq; this.pushTrace(tipWorld); }
 
     // gravity is reported in the trunk frame -> rotate it into the world frame
     var gBody = norm3(sample.gravity);
-    var gWorld = [model[0] * gBody[0] + model[4] * gBody[1] + model[8] * gBody[2],
-                  model[1] * gBody[0] + model[5] * gBody[1] + model[9] * gBody[2],
-                  model[2] * gBody[0] + model[6] * gBody[1] + model[10] * gBody[2]];
+    var gWorld = [trunkModel[0] * gBody[0] + trunkModel[4] * gBody[1] + trunkModel[8] * gBody[2],
+                  trunkModel[1] * gBody[0] + trunkModel[5] * gBody[1] + trunkModel[9] * gBody[2],
+                  trunkModel[2] * gBody[0] + trunkModel[6] * gBody[1] + trunkModel[10] * gBody[2]];
     this.gravDev = angleBetween(gWorld, [0, 0, -1]);
     var arrowFrom = [0, 0, 0];
     var arrowDir = [gWorld[0], gWorld[1], gWorld[2]];

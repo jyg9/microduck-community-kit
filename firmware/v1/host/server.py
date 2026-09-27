@@ -315,8 +315,23 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
     return ws
 
 
+def _no_store(resp: web.StreamResponse) -> web.StreamResponse:
+    """Mark a static file as never reusable from cache.
+
+    aiohttp's FileResponse sends Last-Modified/ETag but no Cache-Control, so a
+    browser falls back to heuristic freshness (10% of the file's age).  A copy of
+    `app.js` fetched while the file was a week old therefore stays "fresh" for
+    hours, and an edit followed by a plain reload silently keeps running the old
+    script -- which looks exactly like "my change did nothing".  This is a local
+    bench tool serving a few KB of static text, so re-reading it every load is
+    free and removes the whole class of confusion.
+    """
+    resp.headers["Cache-Control"] = "no-store, must-revalidate"
+    return resp
+
+
 async def index_handler(request: web.Request) -> web.StreamResponse:
-    return web.FileResponse(os.path.join(WEB_DIR, "index.html"))
+    return _no_store(web.FileResponse(os.path.join(WEB_DIR, "index.html")))
 
 
 async def static_handler(request: web.Request) -> web.StreamResponse:
@@ -326,7 +341,7 @@ async def static_handler(request: web.Request) -> web.StreamResponse:
     path = os.path.join(WEB_DIR, name)
     if not os.path.isfile(path):
         raise web.HTTPNotFound()
-    return web.FileResponse(path)
+    return _no_store(web.FileResponse(path))
 
 
 async def ports_handler(request: web.Request) -> web.StreamResponse:
