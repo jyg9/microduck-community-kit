@@ -4,6 +4,8 @@
 
 <img src="./docs/1.jpg" alt="3d view" width="400"/>
 
+<img src="./docs/2.jpg" alt="3d view" width="400"/>
+
  - 根据需要焊接飞特1910舵机接口或XL330舵机接口，二选一。
 
 ## 其他信息
