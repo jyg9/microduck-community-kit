@@ -346,6 +346,11 @@ FeeTech 0/1 = 真实固件版本（`FW_VERSION_MAJOR/MINOR`，真机读到 `1.0`
 > PB0/PB1），节点 ID 200，与 15 颗 FeeTech HD-1910-C001（型号 `0x1F0A`、fw 3.46、mode 4、
 > 7.2 V：右腿 10–14、左腿 20–24、颈/头/嘴 30–34）共用 1 Mbps 半双工总线；PC 经
 > `/dev/ttyACM1`，调试口/镜像为 `/dev/ttyUSB0`（USART0，PB6/PB7，`BUS_MIRROR_ENABLE=1`）。
+>
+> **这段是当时的台架构型记录**：设备名、开关值和下面所有实测数字都按原样保留。固件后来
+> 把 `BUS_MIRROR_ENABLE` 默认改成 **0**（调试口只输出日志），并把升级窗收紧成只认电机总线；
+> 因此再复现这些实验时要么显式 `-DBUS_MIRROR_ENABLE=1`，要么把 PC 接到电机总线上
+> （`docs/upgrade.md` §1）。
 > 固件构建开关 `IMU_USE_SPI`（`src/board.h`、`CMakeLists.txt`，默认 1）选真驱动
 > `src/imu_spi.c` + `src/lsm6dsv16x.h`，0 则回到模拟器 `src/imu_sim.c`；`src/imu.c` 是门面，
 > 拥有 10 ms 采样网格。
@@ -549,9 +554,10 @@ FeeTech 0/1 = 真实固件版本（`FW_VERSION_MAJOR/MINOR`，真机读到 `1.0`
 四元数重力 vs 加速度夹角、陀螺噪声与 SFLP 重启（检查名见文件内
 `run_real_sensor()` / `run_real_restart()`）。`host/tools/sensor_probe.py` 是新增的只读表征探针。
 
-> 注：仓库里已有的 `.test-out/sensor_probe.json` 与 `.test-out/smoke_final.log` 是
-> **CONVERGE 修复之前**的产物——它们的两条 SFLP 重启检查仍是 FAIL。上表的静止数字与它们一致，
-> 而重启数字（9–13 ms / 1.51–1.52 s）来自修复后重跑的 `bus_smoke.py`。
+> 注：当时台面上留下的 `.test-out/sensor_probe.json` 与 `.test-out/smoke_final.log` 是
+> **CONVERGE 修复之前**的产物（`.test-out/` 是台架输出目录，不在仓库里）——它们的两条 SFLP
+> 重启检查仍是 FAIL。上表的静止数字与它们一致，而重启数字（9–13 ms / 1.51–1.52 s）来自修复
+> 后重跑的 `bus_smoke.py`。
 
 ### 7.7 与 15 颗真舵机共总线（2026-09-25）
 
@@ -622,7 +628,7 @@ missing`（`/tmp/robotd7.log`；整个进程 98 条），缺失集合总是**回
 ## 附录 B · 复现命令
 
 ```bash
-cd soft_imu_to_dxl/v1
+cd v1
 ./host/tools/py.sh host/tools/servo_probe.py --port /dev/ttyACM1 --repeat 21 \
     --json .test-out/servo_probe.json          # 只读：PING / READ / SYNC_READ
 ./host/tools/py.sh host/tools/servo_reboot_probe.py --port /dev/ttyACM1 \

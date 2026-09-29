@@ -3,8 +3,8 @@
     \brief   LSM6DSV16X register map - only what src/imu_spi.c touches
 
     Every address, bit field and constant below is from the ST datasheet
-    DS13510 Rev 4 (`/home/yuguo/code/microduck/IMU/lsm6dsv16x.pdf`, text extract
-    in `IMU/.txt/lsm6dsv16x.txt`).  Section/table numbers are quoted so a
+    DS13510 Rev 4 ("LSM6DSV16X: 6-axis IMU with embedded sensor fusion, AI and
+    Qvar", STMicroelectronics).  Section/table numbers are quoted so a
     disagreement with the silicon can be settled against the source.
 
     Two address spaces exist, switched by FUNC_CFG_ACCESS (01h):

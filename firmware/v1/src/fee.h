@@ -14,7 +14,7 @@
 
     The node presents the HLS memory table (HLSCL.h) so it looks like a servo
     to FeeTech tooling, except that its status area (0x38..0x4B) carries the IMU
-    block - see docs/fee_tech_protocol.md.
+    block - see docs/imu_to_dxl_protocol.md §7 and docs/飞特通讯协议说明.md.
 */
 
 #ifndef FEE_H

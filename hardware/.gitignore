@@ -4,6 +4,8 @@
 *.kicad_sch-bak
 *-backups/
 fp-info-cache
+# editor lock files: a crashed session leaves these behind
+~*.lck
 *.bak
 *.bck
 *.tmp

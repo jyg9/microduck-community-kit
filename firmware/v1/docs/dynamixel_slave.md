@@ -240,7 +240,7 @@ host/tools/run_c_tests.sh
 ../.venv/bin/python - <<'EOF'
 import sys; sys.path.insert(0, "host")
 from bus import Link
-with Link("/dev/ttyUSB0", 1_000_000, "dxl", 200, read_len=20) as l:
+with Link("/dev/ttyACM0", 1_000_000, "dxl", 200, read_len=20) as l:
     print("info", l.device_info())
     print("cfg ", l.get_config())
     for _ in range(5):

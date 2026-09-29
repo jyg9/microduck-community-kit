@@ -357,7 +357,7 @@ header 里），而且 A/B 两个镜像的 header 偏移可能不同。**固定 
 | `UPG_TARGET` | 212 | 1 | r/w | `0`=A，`1`=B。只允许"非当前运行"的 slot | **新** |
 | `UPG_SEQ_L/H` | 213, 214 | 2 | r/w | 块序号，从 0 单调 +1；节点接受 `seq == ack+1` 或重发 `seq == ack` | **新** |
 | `UPG_OFF_0..3` | 215..218 | 4 | r/w | 本块在 slot 内的字节偏移（32 位 LE，4 字节对齐） | **新** |
-| `UPG_BLKLEN` | 219 | 1 | w | 本帧 `UPG_DATA` 的有效字节数，1..16 | **新** |
+| `UPG_BLKLEN` | 219 | 1 | w | 本帧 `UPG_DATA` 的有效字节数，4..16 且为 4 的倍数（FMC 按 32 位字编程） | **新** |
 | `UPG_BLKCRC_L/H` | 220, 221 | 2 | w | 本块 CRC16（`crc16_dxl()`，覆盖 `UPG_DATA[0..BLKLEN-1]`） | **新** |
 | `UPG_ACK_SEQ_L/H` | 222, 223 | 2 | r | 最近一次成功写入的块序号 | **已实现** |
 | `UPG_ERRCODE` | 224 | 1 | r | `1`=块 CRC，`2`=越界，`3`=flash 编程失败，`4`=状态机，`5`=目标槽非法，`6`=缺 magic，`7`=镜像校验失败，`8`=长度 | **已实现** |
@@ -676,7 +676,7 @@ host 侧判定"节点处于 boot 模式"的规则：`ping()` 返回 true 且 mod
 ### 7.3 `upgrade_bus.py` 流程
 
 ```
-参数：--port /dev/ttyUSB0 --baud 1000000 --protocol dxl|fee --id 200
+参数：--port /dev/ttyACM0 --baud 1000000 --protocol dxl|fee --id 200
       --image build/..._slot_a.img --slot a|b [--confirm]
  1. 用 v1/host/bus.py 的 Link 打开端口（不要另写协议层）
  2. ping() 必须成功；打印读回的 model number，判定"应用态"还是"boot 态"
@@ -852,7 +852,7 @@ host 侧判定"节点处于 boot 模式"的规则：`ping()` 返回 true 且 mod
 | 应答路径 | 帧解析在 USART 中断里，发送走 DMA（USART0_TX = DMA0 CH3 / USART1_TX = DMA0 CH6） | 排在后面的设备只留 ≈295 µs，主循环给不出这个上界；在中断里自旋发 21 字节会饿死其它中断 |
 | 遥测发布 | `dev_refresh()` 只在主循环调用（有新样本或每 50 ms），在极短临界区里发布；`dev_read()` 不再刷新 | 读发生在中断里，不能做 ADC/浮点/厂商窗重写；临界区保证中断读到的是整块新或整块旧 |
 | 间隙判据 | 字节间隙 > `BUS_GAP_US`(500) 且**帧解析进行中**才丢弃残帧并计 `gaps` | 20 ms 整帧超时会把"截断帧 + 紧随的新帧"粘起来；空闲间隔不是故障 |
-| 回声门 | 发送期间 + 发送后 2 字节丢弃（`tx_busy` / `echo_skip`），取代原来的 `+2 ms` 窗口 | 原窗口是整数除法的产物，会把紧随其后的主机指令一起吞掉 |
+| 回声门 | 发送期间 + 发送后 2 字节丢弃（`tx_busy` / `echo_skip`），取代原来的 `+2 ms` 窗口（**此行的 2 字节随后被时间窗取代：`UART_ECHO_WINDOW_BYTES = 3` 个字节时间，见 `docs/bus_timing_borrow_plan.md` §4.6.1**） | 原窗口是整数除法的产物，会把紧随其后的主机指令一起吞掉 |
 | FeeTech 契约块 | 56..70 = 12 控制 + 计数 + 状态 + 保留 0（`src/telem_pack.c`）；20 字节诊断块在 128 | 舵机在 56 只答 15 字节，而 `sync_read` 对一个 ID 列表只有一个长度；读 20 字节会让一次事务从 4.9 ms 涨到约 5.7 ms |
 | 应答 STATUS | 恒 0；内部错误记到厂商窗 `V_LAST_ERR`（179） | 飞特工具把非 0 的 ack 状态当舵机故障位；boot 模式同样处理 |
 | FeeTech `0x08` REBOOT | `fee.c` 里不应答地重启，走 `dev_request_reboot()`（应用与 bootloader 共用） | 真机 fw 3.46 实测：0x08 存在、不应答、823 ms 回来、EEPROM 设置保留、RAM 增益回落 EEPROM；本项目的旧手册指令表缺这一条（见 `docs/bus_timing_borrow_plan.md` §1.7） |

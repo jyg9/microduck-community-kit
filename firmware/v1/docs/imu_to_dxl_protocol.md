@@ -4,7 +4,7 @@
 （master）的外部开发者。读完本文即可实现：读遥测、读写配置、触发动作、以及**通过同一条
 电机总线给节点升级固件**。
 
-文中所有数字、地址、位域、操作码与常量都标了出处：源码用 `文件:行`（例如 `src/board.h:294`），
+文中所有数字、地址、位域、操作码与常量都标了出处：源码用 `文件:行`（例如 `src/board.h:301`），
 设计文档用 `文档 §节`。**没有出处、又无法从仓库确认的值，一律不写，集中列在 §15.5
 「未在仓库中找到」**。标注约定：
 
@@ -26,23 +26,23 @@
 120 MHz，`src/board.h:5-6`）节点板。它把一个 **20 字节的 IMU 数据块**发布成**伺服总线上的一个
 从站**，让主机在同一次总线上同时读到姿态与全部舵机状态（`README.md:1-5`）。
 
-真实机器人上的拓扑（`README.md:12-14`、`docs/bus_timing_borrow_plan.md:346-348`）：
+真实机器人上的拓扑（`README.md:11-15`、`docs/bus_timing_borrow_plan.md:346-353`）：
 
 * 节点与 **15 颗 FeeTech HD-1910-C001** 舵机（ID `10-14`、`20-24`、`30-34`）**并联**在
   同一条 **1 Mbps 半双工**伺服总线上；
 * 节点 ID = **200**；
 * 主机（PC / 机器人主控）经 **USB 串口适配器**接到这条总线；
 * 节点使用与舵机**相同的总线电气层与帧格式**，所以总线上其它舵机看到的只是"发给 ID 200 的
-  普通读写"，主机不需要为舵机加任何特殊逻辑（`docs/upgrade.md:151-154`）。
+  普通读写"，主机不需要为舵机加任何特殊逻辑（`docs/upgrade.md:196-199`）。
 
 节点是**从站**：它**只应答，从不主动发送**（【源码】唯一的发送路径都来自收到并解析出一帧之后，
-`src/bus.c:121` 与 `src/bus.c:241`；主循环的 `bus_poll()` 只负责把"等自己应答槽"的延迟应答发出去，
-`src/bus.c:228-248`）。
+`src/bus.c:121` 与 `src/bus.c:243`；主循环的 `bus_poll()` 只负责把"等自己应答槽"的延迟应答发出去，
+`src/bus.c:230-250`）。
 
 ### 1.2 两种协议人格，一条总线
 
 节点在**同一个物理端口**上同时实现了两套协议，按帧的**第 3 个字节**自动识别
-（`src/bus.h:12-16`）：
+（`src/bus.h:13-17`）：
 
 | 人格 | 协议 | 帧头 | 校验 |
 |---|---|---|---|
@@ -70,21 +70,21 @@
 
 | 项目 | 默认 | 出处 |
 |---|---|---|
-| Dynamixel ID（寄存器 7） | **200** | `src/board.h:294`、`src/dev_cfg.c:19` |
-| FeeTech ID（寄存器 5） | **200** | `src/board.h:298`、`src/dev_cfg.c:21` |
-| Dynamixel 波特率码（寄存器 8） | **3** = 1 Mbps | `src/board.h:308`、`src/dev_cfg.c:20` |
-| FeeTech 波特率码（寄存器 6） | **0** = 1 Mbps | `src/board.h:310`、`src/dev_cfg.c:22` |
-| Dynamixel 遥测块地址 | **124**（20 字节） | `src/board.h:432` |
-| FeeTech 契约块地址 | **56**（15 字节） | `src/board.h:433`、`src/board.h:440` |
-| FeeTech 诊断块别名地址 | **128**（20 字节） | `src/board.h:434` |
-| Dynamixel 厂商窗 | **148..167** | `src/board.h:454` |
-| FeeTech 厂商窗 | **160..179** | `src/board.h:455` |
-| 身份窗 / 升级窗（两种协议同址） | **180..195** / **208..255** | `src/board.h:177-178`、`src/board.h:215-216` |
+| Dynamixel ID（寄存器 7） | **200** | `src/board.h:301`、`src/dev_cfg.c:19` |
+| FeeTech ID（寄存器 5） | **200** | `src/board.h:305`、`src/dev_cfg.c:21` |
+| Dynamixel 波特率码（寄存器 8） | **3** = 1 Mbps | `src/board.h:315`、`src/dev_cfg.c:20` |
+| FeeTech 波特率码（寄存器 6） | **0** = 1 Mbps | `src/board.h:317`、`src/dev_cfg.c:22` |
+| Dynamixel 遥测块地址 | **124**（20 字节） | `src/board.h:439` |
+| FeeTech 契约块地址 | **56**（15 字节） | `src/board.h:440`、`src/board.h:447` |
+| FeeTech 诊断块别名地址 | **128**（20 字节） | `src/board.h:441` |
+| Dynamixel 厂商窗 | **148..167** | `src/board.h:461` |
+| FeeTech 厂商窗 | **160..179** | `src/board.h:462` |
+| 身份窗 / 升级窗（两种协议同址） | **180..195** / **208..255** | `src/board.h:184-185`、`src/board.h:222-223` |
 
 ID 与波特率写入后会被节点**夹紧到合法范围并持久化**：Dynamixel ID 限 1..252
 （`src/dev.c:307-311`），FeeTech ID 限 0..252（`src/dev.c:320-324`，`FEE_ID_MAX = 252`，
-`src/board.h:299`）；波特率码非法时忽略并回写旧值（`src/dev.c:313-331`）。**FeeTech ID 禁止
-253（0xFD）**，因为它是 Dynamixel 2.0 的帧头字节（`src/board.h:295-299`、`src/fee.c:323-329`）。
+`src/board.h:306`）；波特率码非法时忽略并回写旧值（`src/dev.c:313-331`）。**FeeTech ID 禁止
+253（0xFD）**，因为它是 Dynamixel 2.0 的帧头字节（`src/board.h:302-306`、`src/fee.c:323-329`）。
 
 ---
 
@@ -95,28 +95,29 @@ ID 与波特率写入后会被节点**夹紧到合法范围并持久化**：Dyna
 | 总线 | 单线**半双工**，所有节点并联；任意时刻只能有一个发送方 | `飞特通讯协议说明.md §1` |
 | 电平 | TTL 3.3 V | `飞特通讯协议说明.md §1` |
 | 帧格式 | **8N1**（8 数据位、无校验、1 停止位），无流控 | 【源码】`src/uart_port.c:99-101`；`飞特通讯协议说明.md §1` |
-| 默认波特率 | **1 Mbps**（Dynamixel 码 3 / FeeTech 码 0） | `src/board.h:301-310`；波特率表 `src/dev.c:592-605` |
-| 节点主总线 | USART1，PA2 = TX / PA3 = RX | `src/board.h:21-23`、`src/board.h:345-348` |
-| 调试/镜像口 | USART0，PB6 = TX / PB7 = RX；`BUS_MIRROR_ENABLE=1` 时也是 1 Mbps 的第二协议端口，否则是 115200 纯调试口 | `src/board.h:30-31,63-68,303-304`、`src/bus.c:179-207` |
-| 方向控制 | **硬件自动方向**：原理图里 `TXD_EN` 由 TX 直接产生（Q1 + R28/R29/C22），固件不控制任何 GPIO | `src/board.h:21-23`、`README.md:77` |
+| 默认波特率 | **1 Mbps**（Dynamixel 码 3 / FeeTech 码 0） | `src/board.h:308-317`；波特率表 `src/dev.c:592-605` |
+| 节点主总线 | USART1，PA2 = TX / PA3 = RX | `src/board.h:21-23`、`src/board.h:352-355` |
+| 调试口 | USART0，PB6 = TX / PB7 = RX；**只输出 DBG_ 日志**（115200），不应答协议帧。`BUS_MIRROR_ENABLE=1`（台架实验构建，默认 **0**）才把它也当第二协议端口；**即使打开，升级会话在那边仍被拒绝**（§10.2） | `src/board.h:30-31,62-75,310-311`、`src/bus.c:181-209` |
+| 方向控制 | **硬件自动方向**：原理图里 `TXD_EN` 由 TX 直接产生（Q1 + R28/R29/C22），固件不控制任何 GPIO | `src/board.h:21-23`、`README.md:78` |
 
 要点：
 
 1. **半双工单线，同一时刻只有一个发送方。** 主机必须严格按照"一帧请求 → 等应答（或超时）
-   → 下一帧"的节奏；不要流水式连发（`docs/upgrade.md` 的升级流程、`src/bus.c:228-248` 的
+   → 下一帧"的节奏；不要流水式连发（`docs/upgrade.md` 的升级流程、`src/bus.c:230-250` 的
    请求-应答结构都依赖这一点）。
 2. **自动方向缓冲把主机的 TX 变成总线驱动**，主机侧必须使用支持 1 Mbps 且方向自动切换的
-   半双工/USB-TTL 适配器；台面用的是 CH340（`docs/upgrade.md:251`、`docs/bus_timing_borrow_plan.md:63`）。
+   半双工/USB-TTL 适配器；台面用的是 CH340（`docs/upgrade.md:305`、`docs/bus_timing_borrow_plan.md:63`）。
 3. **节点能听到自己的发送**（半双工回声）。固件在发送期间以及发送完成后一个**按波特率计算的
    时间窗**（`UART_ECHO_WINDOW_BYTES = 3` 个字节时间，1 Mbps 下 ≈30 µs）内丢弃收到的字节
    （`src/uart_port.h:22-34`、`src/uart_port.c:26-38,251-253`）。主机不需要知道这个窗口，但
    应当知道节点在应答后极短时间内可能收不到紧随的字节——现实中主机下一帧至少是毫秒级，
    远在窗口之外。
-4. **节点上电后立即可应答**：文档给出的验收目标是上电 ≤ 50 ms 内可应答（`docs/bus_timing_borrow_plan.md:418`），
+4. **节点上电后立即可应答**：文档给出的验收目标是上电 ≤ 50 ms 内可应答（`docs/bus_timing_borrow_plan.md:423`），
    **但这一项尚未实测**（同处标注"未测"），所以不要把它当成保证，见 §15.5。
-5. 本文只描述**电机总线**。USART0 的双重身份（调试文本 + 镜像协议口）只影响台架，不影响
-   主机协议实现；若主机同时连接两个端口，注意调试文本行以 `#` 开头且 ASCII 里没有 `0xFF`
-   （`README.md:166-168`）。
+5. 本文只描述**电机总线**。USART0 是**调试口**：只输出 DBG_ 日志，默认不解析任何帧
+   （`BUS_MIRROR_ENABLE = 0`）；台架实验构建把它也当协议口，但**升级会话在那里一律被拒**
+   （§10.2）。调试文本行以 `#` 开头，ASCII 里没有 `0xFF`，所以即使两个口接在同一台 PC 上
+   也不会被误认成帧（`src/dbg.c`）。
 
 ---
 
@@ -132,7 +133,7 @@ ID 与波特率写入后会被节点**夹紧到合法范围并持久化**：Dyna
 | 1 | 1 | `0xFF` | 帧头 |
 | 2 | 1 | `0xFD` | 协议 2.0 标识（**也是协议自动识别的判据**，见 §3.8） |
 | 3 | 1 | `0x00` | 保留 |
-| 4 | 1 | `ID` | 目标 ID（`0xFE` = 广播，`src/board.h:373`） |
+| 4 | 1 | `ID` | 目标 ID（`0xFE` = 广播，`src/board.h:380`） |
 | 5 | 1 | `LEN_L` | 长度低字节 |
 | 6 | 1 | `LEN_H` | 长度高字节 |
 | 7 | 1 | `INST` | 指令码（§5.1） |
@@ -153,7 +154,7 @@ ID 与波特率写入后会被节点**夹紧到合法范围并持久化**：Dyna
 | 0..3 | 4 | `FF FF FD 00` | 帧头 |
 | 4 | 1 | `ID` | 本节点 ID（恒为本机 ID，即使收到的是广播 PING） |
 | 5..6 | 2 | `LEN_L LEN_H` | 长度，**统计填充后的字节** |
-| 7 | 1 | **`0x55`** | **状态标记**：指令帧这里是 `INST`，状态帧这里是固定值 `0x55`（`src/board.h:378-379`） |
+| 7 | 1 | **`0x55`** | **状态标记**：指令帧这里是 `INST`，状态帧这里是固定值 `0x55`（`src/board.h:385-386`） |
 | 8 | 1 | `ERR` | 错误位（§5.3） |
 | 9.. | `n` | `PARAM...` | 参数（**已填充**） |
 | 末 2 | 2 | `CRC_L CRC_H` | CRC-16 |
@@ -231,7 +232,7 @@ for byte in frame_without_crc:
 |---|---|---|---|
 | 0 | 1 | `0xFF` | 帧头 |
 | 1 | 1 | `0xFF` | 帧头 |
-| 2 | 1 | `ID` | `0xFE` = 广播（`src/board.h:405`）；**禁止 `0xFD`** |
+| 2 | 1 | `ID` | `0xFE` = 广播（`src/board.h:412`）；**禁止 `0xFD`** |
 | 3 | 1 | `LEN` | 见下 |
 | 4 | 1 | `INST` | 指令码（§5.2） |
 | 5 | 1 | `ADDR` | 地址（只有带地址的指令才有此字节） |
@@ -287,13 +288,13 @@ SUM = ID + LEN + INST + ADDR + Σ DATA      # 无地址的指令：ADDR 按 0 �
 ### 3.8 协议识别、100 ms 粘滞与强制锁定
 
 **识别判据**：一帧的第 3 个字节为 **`0xFD` ⇒ Dynamixel 2.0**，否则 ⇒ **FeeTech**
-（`src/bus.h:12-16`）。实现上两个解析器同时喂入：
+（`src/bus.h:13-17`）。实现上两个解析器同时喂入：
 
 * FeeTech 解析器在第 3 字节是 `0xFD` 时**直接拒绝并复位**（`src/fee.c:323-329`）；
 * Dynamixel 解析器要求第 3 字节是 `0xFD`（`src/dxl2.c:384-391`）；
 * 两者都要求前两字节是 `FF FF`（`src/dxl2.c:370-383`、`src/fee.c:308-322`）。
 
-**100 ms 粘滞**（【设计】`BUS_PROTO_STICKY_MS = 100`，`src/bus.h:41-46`）：节点**成功应答过**
+**100 ms 粘滞**（【设计】`BUS_PROTO_STICKY_MS = 100`，`src/bus.h:42-47`）：节点**成功应答过**
 某一种协议后，该端口在 **100 ms** 内**只认这种协议**（`src/bus.c:58-87`）。目的：防止
 Dynamixel 载荷里恰好的 `FF FF <本机 ID>` 被误判成 FeeTech 帧，同时让主机切换协议不必等一秒。
 
@@ -308,7 +309,7 @@ Dynamixel 载荷里恰好的 `FF FF <本机 ID>` 被误判成 FeeTech 帧，同�
 1. 同一会话里**只用一种协议**；
 2. 切换协议前**等 > 100 ms**；
 3. 先发一帧同协议请求把端口"粘"到目标协议上；
-4. 用厂商窗 `V_PROTO_LOCK`（偏移 9；0=自动 / 1=仅 Dynamixel / 2=仅 FeeTech，`src/board.h:469`、
+4. 用厂商窗 `V_PROTO_LOCK`（偏移 9；0=自动 / 1=仅 Dynamixel / 2=仅 FeeTech，`src/board.h:476`、
    `src/dev.c:247-250`、`src/bus.c:58-70`）**强制锁定**。写 `V_PROTO_LOCK=1` 或 `2` 后该端口
    对另一种协议的帧一律不解析。
 
@@ -343,7 +344,7 @@ Dynamixel 载荷里恰好的 `FF FF <本机 ID>` 被误判成 FeeTech 帧，同�
 * **缺席设备照样占一槽**，不是"长时间超时"。所以"用总线静默 1 ms 判断缺席"是错的：k=1 时
   应答窗口 295 µs 就开了，等 1 ms 会晚一整槽并撞上后面的设备
   （`docs/bus_timing_borrow_plan.md:36,50,109`）。
-* 本节点使用 **`BUS_SLOT_US = 300`**（300 µs，往上取整）作为自己的槽模型（`src/board.h:445-451`）。
+* 本节点使用 **`BUS_SLOT_US = 300`**（300 µs，往上取整）作为自己的槽模型（`src/board.h:452-458`）。
 
 ### 4.3 本节点的延迟应答（k > 0 时让 k 个槽）
 
@@ -370,16 +371,16 @@ Dynamixel 载荷里恰好的 `FF FF <本机 ID>` 被误判成 FeeTech 帧，同�
 ### 4.4 帧内字节间隙与整帧超时
 
 * **字节间隙规则**：若**帧解析进行中**，相邻字节间隔 > **`BUS_GAP_US = 500 µs`**，则丢弃
-  已收到的残帧，并在下一个 `FF FF` 上重新同步（`src/bus.h:52-55`、`src/bus.c:137-148`）。
+  已收到的残帧，并在下一个 `FF FF` 上重新同步（`src/bus.h:53-56`、`src/bus.c:137-148`）。
   空闲间隔（两次事务之间）不算故障（`src/bus.c:139-141`）。
 * **整帧超时**：若一帧已开始但 20 ms 内没有收完，状态机复位（`DXL_FRAME_TIMEOUT_MS = 20`，
   `src/dxl2.c:15,362-366`；`FEE_FRAME_TIMEOUT_MS = 20`，`src/fee.c:13,301-305`）。
-* 因此主机**不要在一帧中间停顿超过 500 µs**；1 Mbps 下一个字节 10 µs（`docs/bus_timing_borrow_plan.md:596`）。
+* 因此主机**不要在一帧中间停顿超过 500 µs**；1 Mbps 下一个字节 10 µs（`docs/bus_timing_borrow_plan.md:601`）。
 
 ### 4.5 一次 16 设备组合 `sync_read` 的实测往返
 
 真 PCBA + 15 颗真舵机，主机直接发"ID 200 + 15 颗舵机"的一次 `sync_read`（FeeTech 地址 56、
-长度 15），【实测】`docs/bus_timing_borrow_plan.md §7.7`（`README.md:407`）：
+长度 15），【实测】`docs/bus_timing_borrow_plan.md §7.7`（`README.md:438`）：
 
 | 指标 | 值 |
 |---|---|
@@ -399,21 +400,21 @@ Dynamixel 载荷里恰好的 `FF FF <本机 ID>` 被误判成 FeeTech 帧，同�
 
 ## 5. 指令集
 
-### 5.1 Dynamixel 2.0（opcode 来源 `src/board.h:390-401`，行为来源 `src/dxl2.c`）
+### 5.1 Dynamixel 2.0（opcode 来源 `src/board.h:397-408`，行为来源 `src/dxl2.c`）
 
 ID 过滤：只处理 `ID == 本机 ID` 或 `ID == 0xFE`（广播）的帧，其它一律静默忽略
 （`src/dxl2.c:117-123`）。
 
 | INST | 名称 | 方向 | 节点行为 | 出处 |
 |---|---|---|---|---|
-| `0x01` | PING | 主→从 | **总是应答**（广播也答，用本机 ID），参数 = 型号(2, LE) + 固件版本(1)；bootloader 里型号变成 `0xB007`、版本 0 | `src/dxl2.c:128-140`；`src/board.h:153` |
+| `0x01` | PING | 主→从 | **总是应答**（广播也答，用本机 ID），参数 = 型号(2, LE) + 固件版本(1)；bootloader 里型号变成 `0xB007`、版本 0 | `src/dxl2.c:128-140`；`src/board.h:160` |
 | `0x02` | READ | 主→从 | 参数 `ADDR(2) + LEN(2)`；应答 `LEN` 字节。参数个数 ≠ 4 → `ERR=0x08`；`LEN > 256` → `ERR=0x08`；地址越界 → `ERR=0x10`；`STATUS_RETURN_LEVEL = 0` → 静默 | `src/dxl2.c:142-166` |
 | `0x03` | WRITE | 主→从 | 参数 `ADDR(2) + DATA`；整段写，**只要碰到一个只读字节就整帧拒绝**（`ERR=0x02`）。广播写执行但**不应答**；`STATUS_RETURN_LEVEL < 2` 时也不应答 | `src/dxl2.c:168-183`；`src/dev.c:762-774` |
 | `0x04` | REG_WRITE | 主→从 | 暂存写入（最多 `DXL_PEND_MAX = 32` 字节，`src/dxl2.h:33`），等 `ACTION` 执行；除非广播，否则应答 | `src/dxl2.c:185-203` |
 | `0x05` | ACTION | 主→从 | 执行暂存的 `REG_WRITE`；即使没有暂存也应答（非广播） | `src/dxl2.c:205-217` |
 | `0x06` | FACTORY_RESET | 主→从 | 恢复出厂默认**并立即写 Flash**；除非广播，否则应答 | `src/dxl2.c:219-225`；`src/dev.c:842-849` |
 | `0x08` | REBOOT | 主→从 | 先回应答，**50 ms 后软复位**；除非广播，否则应答 | `src/dxl2.c:227-233`；`src/dev.c:836-840` |
-| `0x10` | CLEAR | 主→从 | 清硬件错误状态（地址 70/71）；广播或 `STATUS_RETURN_LEVEL < 2` 时静默 | `src/dxl2.c:235-241`；`src/dev.c:851-855` |
+| `0x10` | CLEAR | 主→从 | 清硬件错误状态（地址 70/71）；广播或 `STATUS_RETURN_LEVEL < 2` 时静默 | `src/dxl2.c:235-241`；`src/dev.c:823-851` |
 | `0x82` | SYNC_READ | 主→从 | 参数 `ADDR(2) + LEN(2) + ID...`；**仅当 ID 列表包含本机 ID 时**读并应答，并按自己的下标 k 让 k 个槽；不在列表 → 静默；`LEN > 256` 或 `STATUS_RETURN_LEVEL = 0` → 静默；参数 < 4 → 静默 | `src/dxl2.c:243-273`；`src/bus.c:107-117` |
 | `0x83` | SYNC_WRITE | 主→从 | 参数 `ADDR(2) + LEN(2) + (ID + DATA)×N`；命中本机 ID 就写；**永不应答** | `src/dxl2.c:275-299` |
 | `0x92` | BULK_READ | 主→从 | 参数布局 `(ADDR(2), LEN(2)) × N + ID × N`（共 7N 字节）；本机 ID 在列表里才应答；参数 < 7 或不是 7 的倍数 → 静默 | `src/dxl2.c:301-329` |
@@ -430,7 +431,7 @@ ID 过滤：只处理 `ID == 本机 ID` 或 `ID == 0xFE`（广播）的帧，其
 （`docs/dynamixel_slave.md:86-87` 把 level 1 概括成"PING + READ/SYNC_READ"，不够精确；
 见 §15.6。）
 
-### 5.2 FeeTech SCS/HLS（opcode 来源 `src/board.h:403-420`，行为来源 `src/fee.c`）
+### 5.2 FeeTech SCS/HLS（opcode 来源 `src/board.h:410-427`，行为来源 `src/fee.c`）
 
 ID 过滤：只处理 `ID == 本机 ID` 或 `ID == 0xFE`（广播）。
 
@@ -454,7 +455,7 @@ ID 过滤：只处理 `ID == 本机 ID` 或 `ID == 0xFE`（广播）。
 `src/dev.c:198`）时全部应答。写寄存器 8 本身立即生效（它是镜像里的字节，`ack_level()` 每次
 现读）。
 
-### 5.3 Dynamixel 错误位（`src/board.h:382-388`）
+### 5.3 Dynamixel 错误位（`src/board.h:389-395`）
 
 | 位 | 值 | 名称 | 本节点是否会产生 |
 |---|---|---|---|
@@ -479,7 +480,7 @@ CRC 错误时：若帧的 ID 是本机 ID，回一帧参数为空的 `ERR=0x20` 
 
 * 本节点**绝不**在这里报告自己的协议错误；
 * 最近一次被拒绝/夹紧的协议错误放在**厂商窗 `V_LAST_ERR`**（DXL 167 / Fee 179，偏移 19，
-  `src/board.h:479-483`、`src/dev.c:139`、`src/dev.c:717-723`），主机需要时**主动去读**；
+  `src/board.h:486-490`、`src/dev.c:139`、`src/dev.c:717-723`），主机需要时**主动去读**；
 * READ 出错时节点回一个**数据长度为 0 的 ACK**（`src/fee.c:121-123`），主机应把
   "应答数据长度 < 请求长度"当成失败信号，再去问 `V_LAST_ERR`。
 
@@ -495,29 +496,29 @@ CRC 错误时：若帧的 ID 是本机 ID，回一帧参数为空的 `ERR=0x20` 
 
 | 偏移 | 字节 | 内容 | 类型/端序 | 刻度 / 编码 | 出处 |
 |---|---|---|---|---|---|
-| 0..1 | 2 | 陀螺 X | `int16` LE | **17.5 mdps/LSB**（±500 dps 量程） | `src/board.h:338-339` |
+| 0..1 | 2 | 陀螺 X | `int16` LE | **17.5 mdps/LSB**（±500 dps 量程） | `src/board.h:345-346` |
 | 2..3 | 2 | 陀螺 Y | `int16` LE | 同上 | 同上 |
 | 4..5 | 2 | 陀螺 Z | `int16` LE | 同上 | 同上 |
-| 6..7 | 2 | 四元数 X | IEEE 754 **binary16** LE | 见下 | `src/board.h:425` |
+| 6..7 | 2 | 四元数 X | IEEE 754 **binary16** LE | 见下 | `src/board.h:432` |
 | 8..9 | 2 | 四元数 Y | binary16 LE | | |
 | 10..11 | 2 | 四元数 Z | binary16 LE | | |
-| 12..13 | 2 | 加速度 X | `int16` LE | **0.122 mg/LSB**（±4 g 量程） | `src/board.h:340-341` |
+| 12..13 | 2 | 加速度 X | `int16` LE | **0.122 mg/LSB**（±4 g 量程） | `src/board.h:347-348` |
 | 14..15 | 2 | 加速度 Y | `int16` LE | 同上 | |
 | 16..17 | 2 | 加速度 Z | `int16` LE | 同上 | |
-| 18 | 1 | 采样计数 | `uint8`，回绕 | 100 Hz 采样栅格 | `src/board.h:336-337,428` |
-| 19 | 1 | 状态位 | 位域 | §6.4 | `src/board.h:429,495-503` |
+| 18 | 1 | 采样计数 | `uint8`，回绕 | 100 Hz 采样栅格 | `src/board.h:343-344,435` |
+| 19 | 1 | 状态位 | 位域 | §6.4 | `src/board.h:436,502-510` |
 
 * **四元数只发 x/y/z**；标量 `w = √(1 − x² − y² − z²)`，**非负**，由主机重建
-  （`src/board.h:425`、`src/imu_spi.c:571-577`、`host/bus.py:485-488`）。
+  （`src/board.h:432`、`src/imu_spi.c:571-577`、`host/bus.py:485-488`）。
 * 陀螺 dps = `raw × 0.0175`；加速度 g = `raw × 0.000122`。
-* **采样率 100 Hz**（10 ms 栅格，`src/board.h:336-337`、`src/imu.c:49-73`）。
+* **采样率 100 Hz**（10 ms 栅格，`src/board.h:343-344`、`src/imu.c:49-73`）。
 * 主机的控制环通常**只取前 12 字节**（陀螺 + 四元数 xyz），这正是运行时读的长度
-  （`TELEM_CTRL_LEN = 12`，`src/board.h:427`；`README.md:102`）。
+  （`TELEM_CTRL_LEN = 12`，`src/board.h:434`；`README.md:102`）。
 
 **坐标系（frame）**：默认上报**芯片系（chip frame）**；厂商窗 `REPORT_FRAME = 1` 时改为上报
-**躯干系（trunk frame）**（`src/board.h:468`、`src/imu_spi.c:550-587`、`src/imu_sim.c:167-205`）。
+**躯干系（trunk frame）**（`src/board.h:475`、`src/imu_spi.c:550-587`、`src/imu_sim.c:167-205`）。
 板子的安装关系是 `躯干系 = [+raw_z, +raw_y, −raw_x]`（绕 Y 轴 +90°），对应
-`MOUNT = [0.70710678, 0, 0.70710678, 0]`（`src/board.h:324-332`、`host/bus.py:144-150`）。
+`MOUNT = [0.70710678, 0, 0.70710678, 0]`（`src/board.h:331-339`、`host/bus.py:144-150`）。
 
 > **注意（源码不一致，见 §15.6）**：真 SPI 驱动在 `REPORT_FRAME=1` 时只旋转**陀螺和四元数**，
 > **加速度保持芯片系**（`src/imu_spi.c:553-594`）；模拟器则把**加速度也一起旋转**
@@ -527,9 +528,9 @@ CRC 错误时：若帧的 ID 是本机 ID，回一帧参数为空的 `ERR=0x20` 
 
 | 协议 | 地址 | 长度 | 内容 | 出处 |
 |---|---|---|---|---|
-| Dynamixel | **124..143** | **20** | 完整 20 字节块 | `src/board.h:432`、`src/dev.c:696` |
-| FeeTech（契约块） | **56..70** | **15** | 12 控制 + 计数 + 状态 + 保留 0 | `src/board.h:433,440-443`、`src/telem_pack.c:10-16` |
-| FeeTech（诊断别名） | **128..147** | **20** | 完整 20 字节块 | `src/board.h:434`、`src/dev.c:697` |
+| Dynamixel | **124..143** | **20** | 完整 20 字节块 | `src/board.h:439`、`src/dev.c:696` |
+| FeeTech（契约块） | **56..70** | **15** | 12 控制 + 计数 + 状态 + 保留 0 | `src/board.h:440,447-450`、`src/telem_pack.c:10-16` |
+| FeeTech（诊断别名） | **128..147** | **20** | 完整 20 字节块 | `src/board.h:441`、`src/dev.c:697` |
 
 **FeeTech 15 字节契约块在 56 处**的精确布局（`src/telem_pack.c:10-16`）：
 
@@ -559,7 +560,7 @@ CRC 错误时：若帧的 ID 是本机 ID，回一帧参数为空的 `ERR=0x20` 
 > （【实测+估算】`docs/bus_timing_borrow_plan.md:46-49,188`）。
 
 因为计数和状态必须塞进这 15 字节，**原始加速度放不下**，所以它只存在于 128 别名的 20 字节
-诊断块里（`src/board.h:436-439`、`docs/bus_timing_borrow_plan.md §0 D1`）。
+诊断块里（`src/board.h:443-446`、`docs/bus_timing_borrow_plan.md §0 D1`）。
 
 ### 6.4 flags 字节（块偏移 19）的每一位
 
@@ -571,10 +572,10 @@ CRC 错误时：若帧的 ID 是本机 ID，回一帧参数为空的 `ERR=0x20` 
 | bit3 | `0x08` | `TELEM_FLAG_SENSOR_ERR` | 传感器不存在/探测失败 | 仅真驱动（`src/imu_spi.c:614-616`） |
 | bit4 | `0x10` | `TELEM_FLAG_SIMULATED` | 本块来自模拟器（`IMU_USE_SPI=0`） | 仅模拟器（`src/imu_sim.c:91,103`） |
 | bit5 | `0x20` | `TELEM_FLAG_FROZEN` | `SIM_MODE=6 frozen`，每块完全相同 | 仅模拟器（`src/imu_sim.c:91`） |
-| bit6 | `0x40` | `TELEM_FLAG_CFG_DIRTY` | 配置未保存 | **当前固件从不置位**（常量在 `src/board.h:502`，`src/` 中无写入点） |
+| bit6 | `0x40` | `TELEM_FLAG_CFG_DIRTY` | 配置未保存 | **当前固件从不置位**（常量在 `src/board.h:509`，`src/` 中无写入点） |
 | bit7 | `0x80` | `TELEM_FLAG_FUSION_OK` | **融合算法正在运行**（不是"已收敛"） | 真驱动传感器在线时（`src/imu_spi.c:603-610`）；模拟器（`src/imu_sim.c:103`） |
 
-各位的常量定义见 `src/board.h:495-503`、主机侧同一份表见 `host/bus.py:103-112`。
+各位的常量定义见 `src/board.h:502-510`、主机侧同一份表见 `host/bus.py:103-112`。
 
 ### 6.5 四元数字节全 0 = 融合尚未收敛（主机必须保持上一有效值）
 
@@ -585,10 +586,10 @@ CRC 错误时：若帧的 ID 是本机 ID，回一帧参数为空的 `ERR=0x20` 
   `LSM_SFLP_CONVERGE_MS = 1500` 主动保持这个窗口：期间**发布零四元数字节**并清 `SFLP_VALID`，
   但 `FUSION_OK` 仍为 1（算法在跑），窗口结束后 flush FIFO 再恢复发布
   （`src/lsm6dsv16x.h:137-145`、`src/imu_spi.c:219-239,603-616`）。
-* 【实测】重启后的实际窗口（`docs/bus_timing_borrow_plan.md §7.6`、`README.md:405`）：
+* 【实测】重启后的实际窗口（`docs/bus_timing_borrow_plan.md §7.6`、`README.md:436`）：
   写 `VCMD_RESET_SIM` 后 **9–13 ms** 四元数字节归零；**1.51–1.52 s** 后恢复非零（< 2.5 s）。
 * 模拟器：`SIM_MODE=5 sflp-wait` 制造同样的"陀螺正常、四元数全 0"状态，用于验证主机的
-  "保持上一有效值"逻辑（`src/imu_sim.h:24`、`README.md:192`）。
+  "保持上一有效值"逻辑（`src/imu_sim.h:24`、`README.md:219`）。
 * 主机侧参考实现就是这么做的：`host/bus.py:535-541` 只在 `quat_valid` 时更新 `last_quat`。
 
 > 主机不要用全 0 四元数去重建 `w=1`：那样会把"没有姿态"误判成"姿态为单位四元数"，
@@ -598,7 +599,8 @@ CRC 错误时：若帧的 ID 是本机 ID，回一帧参数为空的 `ERR=0x20` 
 ### 6.6 真传感器的合理性校验值（主机解码器的自检基线）
 
 以下都是【实测】真 PCBA + 真 LSM6DSV16X 的静止表征（`docs/bus_timing_borrow_plan.md §7.6`、
-`README.md:396-408`、`.test-out/sensor_probe.json`）：
+`README.md:427-439`；同一组数字可以用 `host/tools/sensor_probe.py` 复现，
+`--json` 会把它写成机器可读的探针报告）：
 
 | 项目 | 实测值 |
 |---|---|
@@ -619,23 +621,23 @@ CRC 错误时：若帧的 ID 是本机 ID，回一帧参数为空的 `ERR=0x20` 
 |---|---|---|---|
 | 实时 tick | Dynamixel **120..121**（u16 LE） | `systick_get_ms() & 0xFFFF`，自由于运行、回绕 | `src/dev.c:686-687` |
 | 电压 | Dynamixel **144..145**（u16 LE） | **恒 0**：本节点没有电池分压，"报 0 而不是假值"是设计选择——`microduck` 的电压平均会过滤 0，不会把假读数算进去 | `src/dev.c:699-702`、`docs/dynamixel_slave.md:136` |
-| 温度 | Dynamixel **146**（u8，°C） | 片内温度传感器（ADC0 通道 16），1 Hz 更新，clamp 0..125；`TEMP_SENSOR_ENABLE=0` 时固定 30 | `src/dev.c:527-586,703`、`src/board.h:80-84` |
-| 实时 tick / 电压 / 温度（FeeTech） | — | **没有独立暴露**：FeeTech 62/63 落在契约块内（= 四元数 X 的 two bytes），不是电压/温度。FeeTech 侧没有温度寄存器 | `src/board.h:433,440-443`、`src/dev.c:642-652` |
-| 硬件错误状态 | Dynamixel **70..71**（RO） | 0；`CLEAR(0x10)` 清零 | `src/dev.c:631,851-855` |
+| 温度 | Dynamixel **146**（u8，°C） | 片内温度传感器（ADC0 通道 16），1 Hz 更新，clamp 0..125；`TEMP_SENSOR_ENABLE=0` 时固定 30 | `src/dev.c:527-586,703`、`src/board.h:87-91` |
+| 实时 tick / 电压 / 温度（FeeTech） | — | **没有独立暴露**：FeeTech 62/63 落在契约块内（= 四元数 X 的 two bytes），不是电压/温度。FeeTech 侧没有温度寄存器 | `src/board.h:440,447-450`、`src/dev.c:642-652` |
+| 硬件错误状态 | Dynamixel **70..71**（RO） | 0；`CLEAR(0x10)` 清零 | `src/dev.c:631,823-851` |
 
 ---
 
 ## 7. 寄存器 / 内存映射
 
-节点为**每种协议各维护一份 256 字节寄存器镜像**（`REG_SPACE_SIZE = 256`，`src/board.h:424`），
+节点为**每种协议各维护一份 256 字节寄存器镜像**（`REG_SPACE_SIZE = 256`，`src/board.h:431`），
 Dynamixel 用 XL330 控制表布局、FeeTech 用 HLS 内存表布局（`src/dev.h:1-18`）。读发生在
-中断里、直接读镜像；镜像由主循环发布（`dev_refresh()`，`src/dev.c:659-712`、`src/main.c:263-277`）。
+中断里、直接读镜像；镜像由主循环发布（`dev_refresh()`，`src/dev.c:659-712`、`src/main.c:264-278`）。
 
 ### 7.1 Dynamixel 控制表（主机可能碰的地址）
 
 | 地址 | 名称 | 取值（出厂默认） | R/W | 出处 |
 |---|---|---|---|---|
-| 0..1 | Model Number | **1200（`0x04B0`，XL330）** | 只读 | `src/board.h:315`、`src/dev.c:153` |
+| 0..1 | Model Number | **1200（`0x04B0`，XL330）** | 只读 | `src/board.h:322`、`src/dev.c:153` |
 | 6 | Firmware Version | **`0x10`（v1.0）** | 只读 | `src/board.h:53`、`src/dev.c:154` |
 | 7 | ID | 200（clamp 1..252，持久化） | 读写 | `src/dev.c:155,307-312` |
 | 8 | Baud Rate | 3 = 1 Mbps（码 0..6） | 读写 | `src/dev.c:156,313-318` |
@@ -660,7 +662,7 @@ Dynamixel 用 XL330 控制表布局、FeeTech 用 HLS 内存表布局（`src/dev
 | 144..145 | Present Input Voltage | **0** | **只读** | `src/dev.c:634,702` |
 | 146 | Present Temperature | 片内温度 | **只读** | `src/dev.c:634,703` |
 | 147 | Backup Ready | 0 | **只读** | `src/dev.c:634` |
-| **148..167** | **厂商配置窗（20 字节）** | §8 | 读写 | `src/board.h:454`、`src/dev.c:638` |
+| **148..167** | **厂商配置窗（20 字节）** | §8 | 读写 | `src/board.h:461`、`src/dev.c:638` |
 | 168..179 | Indirect Address 前 12 字节（默认值 224..251） | 读写 | 无间接寻址语义；**180 起被身份窗/升级窗覆盖**（见下） | `src/dev.c:182-184`、`src/dev.c:622-624`、`docs/dynamixel_slave.md:158` |
 | **180..195** | **身份窗（两种协议同址）** | §9 | **只读** | `src/dev.c:622-624,706` |
 | 196..207 | 0 | **只读** | 落在 `ro_high()`（`a >= 180`）里 | `src/dev.c:622-624` |
@@ -677,7 +679,7 @@ Dynamixel 用 XL330 控制表布局、FeeTech 用 HLS 内存表布局（`src/dev
 | 地址 | 名称 | 取值（出厂默认） | R/W | 出处 |
 |---|---|---|---|---|
 | 0 / 1 | 固件主/次版本 | **1 / 0** | **只读** | `src/dev.c:190-191` |
-| 3..4 | 型号（LE） | **`0x4D49`（'I','M'）** | **只读** | `src/board.h:322`、`src/dev.c:192` |
+| 3..4 | 型号（LE） | **`0x4D49`（'I','M'）** | **只读** | `src/board.h:329`、`src/dev.c:192` |
 | 5 | ID | 200（clamp 0..252，持久化） | 读写 | `src/dev.c:193,320-325` |
 | 6 | 波特率码 | 0 = 1 Mbps（码 0..11） | 读写 | `src/dev.c:194,326-331` |
 | 7 | 副 ID | 254（关闭） | 读写（无作用） | `src/dev.c:195` |
@@ -691,7 +693,7 @@ Dynamixel 用 XL330 控制表布局、FeeTech 用 HLS 内存表布局（`src/dev
 | **55** | **锁标志** | **0**（手册初始值是 1，本节点有意改成 0） | 读写 | `src/dev.c:203-207` |
 | **56..70** | **15 字节契约块** | §6.2 | **只读** | `src/dev.c:647,695` |
 | **128..147** | **20 字节诊断块** | §6.1 | **只读** | `src/dev.c:648,697` |
-| **160..179** | **厂商配置窗（20 字节）** | §8 | 读写 | `src/board.h:455`、`src/dev.c:649-650` |
+| **160..179** | **厂商配置窗（20 字节）** | §8 | 读写 | `src/board.h:462`、`src/dev.c:649-650` |
 | **180..195** | **身份窗** | §9 | "只读"（见 §7.4） | `src/dev.c:623` |
 | 208..255 | 升级会话窗 | §10 | 应用态：**接受但忽略**（见 §7.4） | `src/dev.c:645-652` |
 
@@ -735,26 +737,26 @@ Dynamixel 用 XL330 控制表布局、FeeTech 用 HLS 内存表布局（`src/dev
 
 ### 8.1 完整 20 字节布局
 
-两种协议的窗口**同一张表**，只是基址不同：Dynamixel **148**、FeeTech **160**（`src/board.h:453-455`）。
-偏移常量见 `src/board.h:459-483`，填充逻辑见 `src/dev.c:104-142`（`vendor_sync()`），
+两种协议的窗口**同一张表**，只是基址不同：Dynamixel **148**、FeeTech **160**（`src/board.h:460-462`）。
+偏移常量见 `src/board.h:466-490`，填充逻辑见 `src/dev.c:104-142`（`vendor_sync()`），
 解析逻辑见 `src/dev.c:213-299`（`vendor_apply()`）。
 
 | 偏移 | 名称 | 字节 | R/W | 含义 / 取值 | 出处 |
 |---|---|---|---|---|---|
-| 0..1 | `MAGIC` | 2 | r/w | **`0x4D49`（'I','M'，LE）**；`vendor_apply()` 只在 magic 正确时才处理命令 | `src/board.h:457,460-461`；`src/dev.c:221-223` |
-| 2 | `CMD` | 1 | w | 命令码（§8.3）；执行后由节点清 0，读回恒 0 | `src/board.h:462`；`src/dev.c:268-270` |
-| 3 | `SIM_MODE` | 1 | r/w | 模拟模式 0..6（仅 `IMU_USE_SPI=0` 构建改变数据源；真驱动下会触发 `imu_restart()`） | `src/board.h:463`；`src/dev.c:225-231` |
-| 4..5 | `SIM_AMP` | 2 | r/w | 幅度千分比；**写值被夹到 100..5000** | `src/board.h:464-465`；`src/dev.c:232-235` |
-| 6..7 | `SIM_FREQ` | 2 | r/w | 频率千分比；**写值被夹到 100..5000** | `src/board.h:466-467`；`src/dev.c:237-240` |
-| 8 | `REPORT_FRAME` | 1 | r/w | 0 = 芯片系（默认）/ 1 = 躯干系；非法值忽略 | `src/board.h:468`；`src/dev.c:242-246` |
-| 9 | `PROTO_LOCK` | 1 | r/w | 0 = 自动 / 1 = 仅 Dynamixel / 2 = 仅 FeeTech；`> 2` 忽略 | `src/board.h:469`；`src/dev.c:247-250` |
-| 10..11 | `GYRO_BIAS_X` | 2 | r/w | `int16`；**直接加到上报的陀螺原始计数上** | `src/board.h:470-471`；`src/imu_spi.c:532-543` |
-| 12..13 | `GYRO_BIAS_Y` | 2 | r/w | 同上 | `src/board.h:472-473` |
-| 14..15 | `GYRO_BIAS_Z` | 2 | r/w | 同上 | `src/board.h:474-475` |
-| 16 | `MIRROR_BAUD` | 1 | r/w | 镜像/调试口波特率码（FeeTech 编码表）；非法忽略 | `src/board.h:476`；`src/dev.c:258-262` |
-| 17 | `DBG_LEVEL` | 1 | r/w | 0 关 / 1 仅错误 / 2 启动+周期统计（默认）/ 3 每帧跟踪；`> 3` 忽略 | `src/board.h:477`；`src/dev.c:263-266` |
-| 18 | `STATUS` | 1 | r | 状态位（§8.5）；**写入被接受但被忽略** | `src/board.h:478`；`src/dev.c:138` |
-| 19 | `LAST_ERR` | 1 | r | 最近一次被拒绝/夹紧的协议错误（`DXL_ERR_*`）；**写入被接受但被忽略** | `src/board.h:479-483`；`src/dev.c:139,717-723` |
+| 0..1 | `MAGIC` | 2 | r/w | **`0x4D49`（'I','M'，LE）**；`vendor_apply()` 只在 magic 正确时才处理命令 | `src/board.h:464,467-468`；`src/dev.c:221-223` |
+| 2 | `CMD` | 1 | w | 命令码（§8.3）；执行后由节点清 0，读回恒 0 | `src/board.h:469`；`src/dev.c:268-270` |
+| 3 | `SIM_MODE` | 1 | r/w | 模拟模式 0..6（仅 `IMU_USE_SPI=0` 构建改变数据源；真驱动下会触发 `imu_restart()`） | `src/board.h:470`；`src/dev.c:225-231` |
+| 4..5 | `SIM_AMP` | 2 | r/w | 幅度千分比；**写值被夹到 100..5000** | `src/board.h:471-472`；`src/dev.c:232-235` |
+| 6..7 | `SIM_FREQ` | 2 | r/w | 频率千分比；**写值被夹到 100..5000** | `src/board.h:473-474`；`src/dev.c:237-240` |
+| 8 | `REPORT_FRAME` | 1 | r/w | 0 = 芯片系（默认）/ 1 = 躯干系；非法值忽略 | `src/board.h:475`；`src/dev.c:242-246` |
+| 9 | `PROTO_LOCK` | 1 | r/w | 0 = 自动 / 1 = 仅 Dynamixel / 2 = 仅 FeeTech；`> 2` 忽略 | `src/board.h:476`；`src/dev.c:247-250` |
+| 10..11 | `GYRO_BIAS_X` | 2 | r/w | `int16`；**直接加到上报的陀螺原始计数上** | `src/board.h:477-478`；`src/imu_spi.c:532-543` |
+| 12..13 | `GYRO_BIAS_Y` | 2 | r/w | 同上 | `src/board.h:479-480` |
+| 14..15 | `GYRO_BIAS_Z` | 2 | r/w | 同上 | `src/board.h:481-482` |
+| 16 | `MIRROR_BAUD` | 1 | r/w | 镜像/调试口波特率码（FeeTech 编码表）；非法忽略 | `src/board.h:483`；`src/dev.c:258-262` |
+| 17 | `DBG_LEVEL` | 1 | r/w | 0 关 / 1 仅错误 / 2 启动+周期统计（默认）/ 3 每帧跟踪；`> 3` 忽略 | `src/board.h:484`；`src/dev.c:263-266` |
+| 18 | `STATUS` | 1 | r | 状态位（§8.5）；**写入被接受但被忽略** | `src/board.h:485`；`src/dev.c:138` |
+| 19 | `LAST_ERR` | 1 | r | 最近一次被拒绝/夹紧的协议错误（`DXL_ERR_*`）；**写入被接受但被忽略** | `src/board.h:486-490`；`src/dev.c:139,717-723` |
 
 ### 8.2 读写规则（重要）
 
@@ -764,7 +766,7 @@ Dynamixel 用 XL330 控制表布局、FeeTech 用 HLS 内存表布局（`src/dev
   `docs/dynamixel_slave.md:146-148`）。
 * **命令执行需要 magic**：`vendor_apply()` 先读窗口 magic，不等于 `0x4D49` 就直接
   return（`src/dev.c:221-223`）。实践中窗口里本来就存着 magic，所以**单独写偏移 2 一个字节
-  也能执行命令**；但稳妥的做法是**读回整窗 → 改字段 → 整窗写回**（`host/upgrade.py:269-272,299-302`
+  也能执行命令**；但稳妥的做法是**读回整窗 → 改字段 → 整窗写回**（`host/upgrade.py:457-460,428-431`
   的 `ask_for_boot()` / `confirm_image()` 就是这么做的）。
 * **命令执行时机**：写入落在窗口内（`addr+len` 与 `[base, base+19]` 相交）时，
   `dev_write()` 末尾调用 `vendor_apply()`（`src/dev.c:782-790`）。命令被消费后节点把 `CMD`
@@ -772,7 +774,7 @@ Dynamixel 用 XL330 控制表布局、FeeTech 用 HLS 内存表布局（`src/dev
 * **写窗口不会被"整帧拒绝"波及**：Dynamixel 的 `ro_dxl()` 特意**不**把 148..167 视为只读
   （`src/dev.c:635-638`），所以 20 字节整窗写入不会被 ACCESS 拒绝。
 
-### 8.3 命令码（`V_CMD`，`src/board.h:486-493`）
+### 8.3 命令码（`V_CMD`，`src/board.h:493-500`）
 
 | 码 | 名称 | 当前固件的行为 | 出处 |
 |---|---|---|---|
@@ -790,10 +792,10 @@ Dynamixel 用 XL330 控制表布局、FeeTech 用 HLS 内存表布局（`src/dev
 
 普通寄存器（ID/波特率）与厂商窗字段的改动会标脏（`s_cfg_dirty`），主循环在**写入平静
 500 ms 且总线安静 1.5 s** 后自动写 Flash（`CFG_SAVE_QUIET_MS = 500`、`CFG_SAVE_IDLE_MS = 1500`，
-`src/dev.c:815-826`、`src/main.c:280-287`）。原因是擦一页 Flash 会让内核（含 USART 中断）
-停顿几十毫秒（`src/dev.h:44-55`、`README.md:212-215`）。显式 `VCMD_SAVE` 是立即写。
+`src/dev.c:815-826`、`src/main.c:281-288`）。原因是擦一页 Flash 会让内核（含 USART 中断）
+停顿几十毫秒（`src/dev.h:44-55`、`README.md:239-242`）。显式 `VCMD_SAVE` 是立即写。
 
-### 8.5 厂商窗 `STATUS` 位（`src/board.h:505-508`）
+### 8.5 厂商窗 `STATUS` 位（`src/board.h:512-515`）
 
 | 位 | 值 | 名称 | 含义 |
 |---|---|---|---|
@@ -808,57 +810,66 @@ Dynamixel 用 XL330 控制表布局、FeeTech 用 HLS 内存表布局（`src/dev
 ## 9. 身份窗（180..195，只读）
 
 主机在决定"对面是谁、要不要升级"之前先读这 16 字节。两种协议**同址**，应用与 bootloader
-都提供（`src/board.h:174-179`、`src/dev.c:705-707`、`src/boot_regs.c:184-185`）。
+都提供（`src/board.h:181-186`、`src/dev.c:705-707`、`src/boot_regs.c:184-185`）。
 
 | 偏移 | 绝对地址 | 名称 | 含义 | 出处 |
 |---|---|---|---|---|
-| 0..1 | 180..181 | `UID_MAGIC` | **`0x5055`（'U','P'，LE）** | `src/board.h:179,181-182` |
-| 2 | 182 | `UID_MODE` | **0 = 应用，1 = bootloader** | `src/board.h:183,205-206` |
-| 3 | 183 | `UID_SLOT_RUN` | 0 = A，1 = B，**255 = 无**（应用是当前运行的槽；boot 下是"将要运行"的槽） | `src/board.h:184`；`src/dev.c:391,396`；`src/boot_regs.c:76,84` |
-| 4 | 184 | `UID_FLAGS` | bit0 = **有效 trial**、bit1 = 已确认、bit7 = 镜像头无效/未打包；低位的其余位来自镜像头 `flags` | `src/board.h:185,198-211`；`src/dev.c:392,399-409` |
-| 5..6 | 185..186 | `UID_VER_L/H` | 运行镜像的 `image_version`（u16 LE，格式见 §13） | `src/board.h:186-187`；`src/dev.c:393` |
-| 7..10 | 187..190 | `UID_IMGCRC_0..3` | 该镜像的"两段拼接"CRC-32（u32 LE，与 `.ipkg` 的 `payload_crc32` 同值） | `src/board.h:188-191`；`src/dev.c:394` |
-| 11 | 191 | `UID_INFO_VERSION` | **扩展版本 = 1** 表示 192..195 有效；老固件为 0，主机应显示 unknown 而不是瞎猜 | `src/board.h:192,203`；`src/dev.c:410` |
-| 12 | 192 | `UID_BOOT_SLOT` | 配置页 `boot_slot`（最近确认的槽；255 = 无） | `src/board.h:193`；`src/dev.c:411` |
-| 13 | 193 | `UID_TRIAL_SLOT` | 配置页 `trial_slot`（还在试用的槽） | `src/board.h:194`；`src/dev.c:412` |
-| 14 | 194 | `UID_ATTEMPTS` | 已尝试的 trial 启动次数 | `src/board.h:195`；`src/dev.c:413` |
-| 15 | 195 | `UID_BOOT_STAY` | bootloader 是否被要求停住 | `src/board.h:196`；`src/dev.c:414` |
+| 0..1 | 180..181 | `UID_MAGIC` | **`0x5055`（'U','P'，LE）** | `src/board.h:186,188-189` |
+| 2 | 182 | `UID_MODE` | **0 = 应用，1 = bootloader** | `src/board.h:190,212-213` |
+| 3 | 183 | `UID_SLOT_RUN` | 0 = A，1 = B，**255 = 无**（应用是当前运行的槽；boot 下是"将要运行"的槽） | `src/board.h:191`；`src/dev.c:391,396`；`src/boot_regs.c:76,84` |
+| 4 | 184 | `UID_FLAGS` | bit0 = **有效 trial**、bit1 = 已确认、bit7 = 镜像头无效/未打包；低位的其余位来自镜像头 `flags` | `src/board.h:192,205-218`；`src/dev.c:392,399-409` |
+| 5..6 | 185..186 | `UID_VER_L/H` | 运行镜像的 `image_version`（u16 LE，格式见 §13） | `src/board.h:193-194`；`src/dev.c:393` |
+| 7..10 | 187..190 | `UID_IMGCRC_0..3` | 该镜像的"两段拼接"CRC-32（u32 LE，与 `.ipkg` 的 `payload_crc32` 同值） | `src/board.h:195-198`；`src/dev.c:394` |
+| 11 | 191 | `UID_INFO_VERSION` | **扩展版本 = 1** 表示 192..195 有效；老固件为 0，主机应显示 unknown 而不是瞎猜 | `src/board.h:199,210`；`src/dev.c:410` |
+| 12 | 192 | `UID_BOOT_SLOT` | 配置页 `boot_slot`（最近确认的槽；255 = 无） | `src/board.h:200`；`src/dev.c:411` |
+| 13 | 193 | `UID_TRIAL_SLOT` | 配置页 `trial_slot`（还在试用的槽） | `src/board.h:201`；`src/dev.c:412` |
+| 14 | 194 | `UID_ATTEMPTS` | 已尝试的 trial 启动次数 | `src/board.h:202`；`src/dev.c:413` |
+| 15 | 195 | `UID_BOOT_STAY` | bootloader 是否被要求停住 | `src/board.h:203`；`src/dev.c:414` |
 
 要点：
 
-* **bit0 是"有效 trial"而不是镜像头里的位**（`src/board.h:198-203`）：镜像头打包后不可改
+* **bit0 是"有效 trial"而不是镜像头里的位**（`src/board.h:205-210`）：镜像头打包后不可改
   （Flash 只能 1→0），"是否已确认"记在配置页，由固件折算到这一位。应用态看"trial 槽 == 当前
   槽"（`src/dev.c:406-409`）；boot 态看"存在 trial 槽"（`src/boot_regs.c:175-181`）。
 * **bit7**（`UID_FLAG_NO_HEADER = 0x80`）在应用自己的镜像头缺失/无效时置位——例如用调试器
-  直接烧的 `.bin`（`src/board.h:208-211`、`src/dev.c:399-401`）。
+  直接烧的 `.bin`（`src/board.h:215-218`、`src/dev.c:399-401`）。
 * 应用态写 180..255：Dynamixel 返回 `ERR=0x02`（ACCESS），FeeTech 静默无效（§7.4）。
 * boot 态写 180..195：**接受并忽略**（`src/boot_regs.c:227-231`）。
 * **实测样例**（应用态、slot A、非 trial、`boot_slot = trial_slot = 255`）：
   `55 50 00 00 00 00 10 82 4D EE B4 01 FF FF 00 00`
-  （`docs/upgrade.md:264`；version = `0x0010` = 1.0，imgcrc = `0x01B4EE82`）。
+  （`docs/upgrade.md:318`；version = `0x0010` = 1.0，imgcrc = `0x01B4EE82`）。
 
 ---
 
 ## 10. 升级协议
 
 本节是本文重点。升级**不引入任何新帧类型**：Dynamixel 用 `INST_READ/WRITE`、FeeTech 用
-`READ/WRITE`，都是普通寄存器读写（`docs/upgrade.md:151-154`、`src/boot_upgrade.h:5-9`）。
+`READ/WRITE`，都是普通寄存器读写（`docs/upgrade.md:196-199`、`src/boot_upgrade.h:5-9`）。
+
+> **升级走哪条线，取决于主机把帧发到哪条线。** 升级窗（208..255）就是普通寄存器，
+> 协议层不区分端口：节点在 USART1（电机总线）上服务它；台架实验构建
+> （`BUS_MIRROR_ENABLE=1`）里 USART0 也服务它。默认构建里 USART0 是**只输出 DBG_ 日志的
+> 调试口**，根本不解析帧（`BUS_MIRROR_ENABLE = 0`），所以对调试口发协议只会超时。
+> 端口的正确性由主机工具负责：`host/upgrade.py` 的 `--port` 默认 `auto`，**逐个探测**
+> `ttyACM0-1`、`ttyUSB0-5`、`ttyS2` 里存在的设备，取第一个真能应答节点的那个并打印结果
+> （存在的 `ttyUSB*` 不按名字排除，按应答判断），同时拒绝和另一个主机抢端口（机器人上是
+> robotd）。
 
 ### 10.1 如何通过总线进入 / 离开 bootloader
 
 **进入（应用态 → bootloader）**：
 
 1. 主机向厂商窗（DXL 148 / Fee 160）写 `V_CMD = 6`（`VCMD_BOOT`），通常做"读回整窗 →
-   改 magic(0..1) 和 cmd(2) → 整窗写回"（`host/upgrade.py:263-290`）。
+   改 magic(0..1) 和 cmd(2) → 整窗写回"（`host/upgrade.py:451-478`）。
 2. 节点：置持久化 `boot_stay = 1` → 立即写配置页 → 写 SRAM 握手字 → 安排 **50 ms** 后软复位
    （`src/dev.c:501-510`、`src/dev.c:836-840`）。应答先发出去。
 3. 复位后 bootloader 看到 `boot_stay`（或 SRAM 握手字）就**停在 boot 模式**服务总线
-   （`src/boot_main.c:358-365,376-399`）。主机轮询身份窗，`UID_MODE` 变成 1 即已进入
-   （`host/upgrade.py:276-290`，默认 6 s 超时）。
+   （`src/boot_main.c:370-377,388-411`）。主机轮询身份窗，`UID_MODE` 变成 1 即已进入
+   （`host/upgrade.py:464-478`，默认 6 s 超时）。
 4. **如何识别"在 bootloader"**（任一即可）：
    * 身份窗 `UID_MODE = 1`（最可靠）；
-   * Dynamixel `PING` 返回型号 `0xB007`（`BOOT_MODEL_NUMBER`，`src/board.h:153`）；
-   * FeeTech `READ 3..4` 返回 `0x00B7`（`BOOT_FEE_MODEL_NUMBER`，`src/board.h:154`）；
+   * Dynamixel `PING` 返回型号 `0xB007`（`BOOT_MODEL_NUMBER`，`src/board.h:160`）；
+   * FeeTech `READ 3..4` 返回 `0x00B7`（`BOOT_FEE_MODEL_NUMBER`，`src/board.h:161`）；
    * Dynamixel 固件版本寄存器 6 = 0（`src/boot_regs.c:98`）。
 
 **离开（bootloader → 应用）**，三种方式：
@@ -866,42 +877,42 @@ Dynamixel 用 XL330 控制表布局、FeeTech 用 HLS 内存表布局（`src/dev
 1. `UPG_CMD_REBOOT`（命令 6）：bootloader 清 `boot_stay` 并写配置页，50 ms 后复位，按启动
    决策运行（通常是刚提交的 trial 镜像）（`src/boot_upgrade.c:396-402`、`src/boot_regs.c:54-60`）。
 2. **主机消失超时**：只要有一个可启动槽，boot 模式在 **`BOOT_IDLE_EXIT_MS = 30000`**（30 s）
-   没有收到任何总线帧后，清 `boot_stay` 并正常启动（`src/board.h:170`、`src/boot_main.c:312-317`）。
+   没有收到任何总线帧后，清 `boot_stay` 并正常启动（`src/board.h:177`、`src/boot_main.c:324-329`）。
    这是"主机失联不会把机器人吊死"的兜底。
 3. 断电重启：`boot_stay` 是**持久化**的，所以单纯断电会再次进 boot 模式；30 s 无主机后仍会
    自动退出（同上）。收尾时应显式发 `UPG_CMD_REBOOT`，或等 idle 超时。
 
 > `VCMD_BOOT` 依赖配置页可写和 SRAM 握手字跨软复位（SRAM 无 VBAT，不跨掉电，
-> `src/boot_ram.h:16-19`）；持久化的 `boot_stay` 才是跨掉电的那一半（`src/board.h:156-161`）。
+> `src/boot_ram.h:16-19`）；持久化的 `boot_stay` 才是跨掉电的那一半（`src/board.h:163-168`）。
 
 ### 10.2 升级会话窗（208..255，48 字节，两种协议同址）
 
 窗口基址 `UPGRADE_WIN_ADDR = 208`、长 48；数据窗 `UPGRADE_DATA_ADDR = 240`、长 16
-（`src/board.h:215-218`）。偏移常量见 `src/board.h:221-253`，状态机见 `src/boot_upgrade.c`。
+（`src/board.h:222-225`）。偏移常量见 `src/board.h:228-260`，状态机见 `src/boot_upgrade.c`。
 
 | 绝对地址 | 窗口偏移 | 名称 | 字节 | 方向 | 含义 | 出处 |
 |---|---|---|---|---|---|---|
-| 208..209 | 0..1 | `U_MAGIC_L/H` | 2 | r/w | **`0x4247`（'G','B'，LE）**；写对即**打开**会话，写错即关闭（并丢弃 active 会话） | `src/board.h:219,221-222`；`src/boot_upgrade.c:444-454` |
-| 210 | 2 | `U_CMD` | 1 | w | 命令码（§10.3）；执行后节点清 0，读回恒 0 | `src/board.h:223`；`src/boot_upgrade.c:467-470` |
-| 211 | 3 | `U_STATUS` | 1 | **只读** | 状态码（§10.4） | `src/board.h:224`；`src/boot_upgrade.c:50-62` |
-| 212 | 4 | `U_TARGET` | 1 | r/w | 目标槽：0 = A，1 = B | `src/board.h:225` |
-| 213..214 | 5..6 | `U_SEQ_L/H` | 2 | r/w | 块序号，从 0 起 | `src/board.h:226-227` |
-| 215..218 | 7..10 | `U_OFF_0..3` | 4 | r/w | 块在槽内的字节偏移（u32 LE，**4 字节对齐**） | `src/board.h:228-231`；`src/boot_upgrade.c:216` |
-| 219 | 11 | `U_BLKLEN` | 1 | r/w | 本块长度；**有效值 4/8/12/16（4..16 且是 4 的倍数）** | `src/board.h:232,260-261`；`src/boot_upgrade.c:472-478` |
-| 220..221 | 12..13 | `U_BLKCRC_L/H` | 2 | w | 本块数据的 `crc16_dxl`（CRC-16，§3.3） | `src/board.h:233-234`；`src/boot_upgrade.c:220-224` |
-| 222..223 | 14..15 | `U_ACK_SEQ_L/H` | 2 | **只读** | 最近一次被接受的块序号 | `src/board.h:235-236`；`src/boot_upgrade.c:55` |
-| 224 | 16 | `U_ERRCODE` | 1 | **只读** | 错误码（§10.4） | `src/board.h:237` |
-| 225..226 | 17..18 | `U_VER_L/H` | 2 | r/w | 待写镜像的 `image_version`；节点会与镜像头交叉核对 | `src/board.h:238-239`；`src/boot_upgrade.c:298-301` |
-| 227..230 | 19..22 | `U_NODE_CRC_0..3` | 4 | **只读** | 节点在 `UPG_END` 重算出的整镜像 CRC-32（u32 LE） | `src/board.h:240-243`；`src/boot_upgrade.c:69,279` |
-| 231 | 23 | `U_RESERVED` | 1 | **只读** | 0 | `src/board.h:244`；`src/boot_upgrade.c:52` |
-| 232..235 | 24..27 | `U_IMGLEN_0..3` | 4 | r/w | 整镜像长度（u32 LE） | `src/board.h:245-248` |
-| 236..239 | 28..31 | `U_IMGCRC_0..3` | 4 | r/w | 主机算的整镜像 CRC-32（u32 LE，与节点同序） | `src/board.h:249-252` |
-| **240..255** | **32..47** | `U_DATA` | **16** | r/w | 数据窗；`READBACK` 也回填到这里 | `src/board.h:217,253-254` |
+| 208..209 | 0..1 | `U_MAGIC_L/H` | 2 | r/w | **`0x4247`（'G','B'，LE）**；写对即**打开**会话，写错即关闭（并丢弃 active 会话） | `src/board.h:226,228-229`；`src/boot_upgrade.c:444-454` |
+| 210 | 2 | `U_CMD` | 1 | w | 命令码（§10.3）；执行后节点清 0，读回恒 0 | `src/board.h:230`；`src/boot_upgrade.c:467-470` |
+| 211 | 3 | `U_STATUS` | 1 | **只读** | 状态码（§10.4） | `src/board.h:231`；`src/boot_upgrade.c:50-62` |
+| 212 | 4 | `U_TARGET` | 1 | r/w | 目标槽：0 = A，1 = B | `src/board.h:232` |
+| 213..214 | 5..6 | `U_SEQ_L/H` | 2 | r/w | 块序号，从 0 起 | `src/board.h:233-234` |
+| 215..218 | 7..10 | `U_OFF_0..3` | 4 | r/w | 块在槽内的字节偏移（u32 LE，**4 字节对齐**） | `src/board.h:235-238`；`src/boot_upgrade.c:216` |
+| 219 | 11 | `U_BLKLEN` | 1 | r/w | 本块长度；**有效值 4/8/12/16（4..16 且是 4 的倍数）** | `src/board.h:239,267-268`；`src/boot_upgrade.c:472-478` |
+| 220..221 | 12..13 | `U_BLKCRC_L/H` | 2 | w | 本块数据的 `crc16_dxl`（CRC-16，§3.3） | `src/board.h:240-241`；`src/boot_upgrade.c:220-224` |
+| 222..223 | 14..15 | `U_ACK_SEQ_L/H` | 2 | **只读** | 最近一次被接受的块序号 | `src/board.h:242-243`；`src/boot_upgrade.c:55` |
+| 224 | 16 | `U_ERRCODE` | 1 | **只读** | 错误码（§10.4） | `src/board.h:244` |
+| 225..226 | 17..18 | `U_VER_L/H` | 2 | r/w | 待写镜像的 `image_version`；节点会与镜像头交叉核对 | `src/board.h:245-246`；`src/boot_upgrade.c:298-301` |
+| 227..230 | 19..22 | `U_NODE_CRC_0..3` | 4 | **只读** | 节点在 `UPG_END` 重算出的整镜像 CRC-32（u32 LE） | `src/board.h:247-250`；`src/boot_upgrade.c:69,279` |
+| 231 | 23 | `U_RESERVED` | 1 | **只读** | 0 | `src/board.h:251`；`src/boot_upgrade.c:52` |
+| 232..235 | 24..27 | `U_IMGLEN_0..3` | 4 | r/w | 整镜像长度（u32 LE） | `src/board.h:252-255` |
+| 236..239 | 28..31 | `U_IMGCRC_0..3` | 4 | r/w | 主机算的整镜像 CRC-32（u32 LE，与节点同序） | `src/board.h:256-259` |
+| **240..255** | **32..47** | `U_DATA` | **16** | r/w | 数据窗；`READBACK` 也回填到这里 | `src/board.h:224,260-261` |
 
 **只读字节**（节点忽略对它们的写入）：`U_STATUS`(3)、`U_RESERVED`(23)、`U_ACK_SEQ`(14..15)、
 `U_ERRCODE`(16)、`U_NODE_CRC`(19..22)（`src/boot_upgrade.c:50-62`）。窗口内其余字节可写。
 
-### 10.3 命令码（`U_CMD`，`src/board.h:264-271`）
+### 10.3 命令码（`U_CMD`，`src/board.h:271-278`）
 
 | 码 | 名称 | 节点动作 | 出处 |
 |---|---|---|---|
@@ -920,7 +931,7 @@ Dynamixel 用 XL330 控制表布局、FeeTech 用 HLS 内存表布局（`src/dev
 
 ### 10.4 状态码与错误码
 
-**状态 `U_STATUS`**（`src/board.h:273-279`）：
+**状态 `U_STATUS`**（`src/board.h:280-286`）：
 
 | 值 | 名称 | 含义 |
 |---|---|---|
@@ -932,7 +943,7 @@ Dynamixel 用 XL330 控制表布局、FeeTech 用 HLS 内存表布局（`src/dev
 | 5 | `UPG_ST_COMMITTED` | 已提交为 trial 并写入配置页 |
 | `0x80` | `UPG_ST_ERROR` | **错误标志**，与错误码按位或（`0x80｜errcode`） |
 
-**错误码 `U_ERRCODE`**（`src/board.h:281-289`；`fail()` 在 `src/boot_upgrade.c:128-132`）：
+**错误码 `U_ERRCODE`**（`src/board.h:288-296`；`fail()` 在 `src/boot_upgrade.c:128-132`）：
 
 | 值 | 名称 | 触发条件 |
 |---|---|---|
@@ -948,14 +959,14 @@ Dynamixel 用 XL330 控制表布局、FeeTech 用 HLS 内存表布局（`src/dev
 
 ### 10.5 主机操作步骤（逐条）
 
-以下顺序即 `host/upgrade.py` 参考实现（`Upgrader`，`host/upgrade.py:326-548`）。
+以下顺序即 `host/upgrade.py` 参考实现（`Upgrader`，`host/upgrade.py:514-736`）。
 **关键：块写长度由"实际写入数据窗的字节数"决定**，不是由主机声明的 `U_BLKLEN` 决定
-（`src/boot_upgrade.c:456-465`；`docs/upgrade.md:197-199`）。
+（`src/boot_upgrade.c:456-465`；`docs/upgrade.md:242-247`）。
 
 #### 步骤 0：确认在 bootloader、选定目标槽
 
 读身份窗（§9）；要求 `UID_MODE = 1`。若目标是节点当前运行的槽，拒绝并改刷另一个槽
-（`host/upgrade.py:696-707`）。`.ipkg` 里 `slot != 255` 时目标槽由包决定（`host/upgrade.py:586-594`）。
+（`host/upgrade.py:884-895`）。`.ipkg` 里 `slot != 255` 时目标槽由包决定（`host/upgrade.py:774-782`）。
 
 #### 步骤 1：打开会话（写 magic + 参数）
 
@@ -966,7 +977,7 @@ write(U_IMGLEN_0, image_size)   # 232..235
 write(U_IMGCRC_0, host_crc)     # 236..239（两段拼接 CRC-32）
 write(U_VER_L, image_version)   # 225..226
 ```
-（`host/upgrade.py:377-387`。）
+（`host/upgrade.py:565-575`。）
 
 #### 步骤 2：`UPG_BEGIN`
 
@@ -975,7 +986,7 @@ write(U_CMD, 1)
 read  U_STATUS(211) 起 24 字节   # 一次读拿到 status/errcode/ack_seq/node_crc（偏移 3..22）
 ```
 期望 `U_STATUS == 1 (ERASED)`。擦除时间取决于页数：**≈25 ms/页**（【实测/估算】
-`docs/bus_timing_borrow_plan.md:611`），所以超时给 ≥2 s（`host/upgrade.py:388-401` 用 4 s）。
+`docs/bus_timing_borrow_plan.md:616`），所以超时给 ≥2 s（`host/upgrade.py:576-589` 用 4 s）。
 擦除期间节点**不响应总线**，主机必须暂停对舵机的轮询（`docs/flash_layout.md:538-541`）。
 
 #### 步骤 3：`DATA` 块循环
@@ -983,7 +994,7 @@ read  U_STATUS(211) 起 24 字节   # 一次读拿到 status/errcode/ack_seq/nod
 每块 16 字节（最后一块由包的长度决定；`.ipkg` 打包时已把镜像补齐到 4 的倍数，
 `host/package.py:480-488`，所以每块都是 4 的倍数）。参考实现把"控制字段 + 数据"放在**一帧**里
 （从窗口偏移 5 = 地址 213 开始，到数据结束），并在帧内把经过的 `ver/imglen/imgcrc` 重新填一遍，
-避免被这一帧覆盖成 0（`host/upgrade.py:326-334,403-415`）：
+避免被这一帧覆盖成 0（`host/upgrade.py:514-522,532-544`）：
 
 ```
 frame = seq(2) | off(4) | blklen(1) | blkcrc(2) | (ACK_SEQ+ERRCODE 222..224 只读，填空) |
@@ -1001,7 +1012,7 @@ read  U_STATUS(211) 起 24 字节   # 校验 status/ack_seq
   （幂等：同一偏移重写同样内容，`bytes_written` 不重复计）；其它值 → `RANGE`(2)，**不碰 Flash**，
   主机应从 `U_ACK_SEQ` 重新同步（`src/boot_upgrade.c:226-236,250-256`）；
 * 节点写完后**立即回读比对**，不一致算 `FLASH`(3)（`src/boot_upgrade.c:242-248`）；
-* 参考实现每块失败最多重试 3 次，**重发同一个 `seq`**（`host/upgrade.py:417-447`）。
+* 参考实现每块失败最多重试 3 次，**重发同一个 `seq`**（`host/upgrade.py:605-635`）。
 
 也可以拆成两帧（控制帧写 213 的 9 字节，再单独写数据窗 240）：`UPG_CMD_DATA` 只把状态置为
 `RECEIVING`，随后的数据窗写入触发块编程。C 测试两种写法都覆盖（`docs/flash_layout.md:796`）。
@@ -1015,7 +1026,7 @@ read  U_STATUS(211) 起 24 字节
 节点重算 `crc32(low || high)` 并与 `U_IMGCRC` 比对，再回读应用头校验
 （magic / header_version / `image_size` / 两段 CRC / entry / board_id / proto_version / no-boot），
 全部通过才提交。期望 `U_STATUS == 5 (COMMITTED)`，并可在 227..230 读到节点 CRC 与主机值比对
-（`src/boot_upgrade.c:262-319`；`host/upgrade.py:449-465`）。
+（`src/boot_upgrade.c:262-319`；`host/upgrade.py:637-653`）。
 
 #### 步骤 5：`READBACK`（可选，验证落盘）
 
@@ -1028,12 +1039,12 @@ write(U_TARGET, target)
     read  (U_DATA_OFF = 240, chunk)
 ```
 **每个 chunk 都必须重新发一次 `READBACK`**：数据窗只在命令执行时刷新，重复读同一窗口只会
-拿到第一段（`host/upgrade.py:479-505` 的注释）。`U_BLKLEN` 在 readback 里允许 **1..16**
+拿到第一段（`host/upgrade.py:667-693` 的注释）。`U_BLKLEN` 在 readback 里允许 **1..16**
 （不像块写必须 4 的倍数，`src/boot_upgrade.c:356`）。
 
 #### 步骤 6：`CONFIRM`
 
-* 若节点已重启进应用：向厂商窗写 `V_CMD = 5`（`VCMD_CONFIRM`）立即确认（`host/upgrade.py:293-304`）。
+* 若节点已重启进应用：向厂商窗写 `V_CMD = 5`（`VCMD_CONFIRM`）立即确认（`host/upgrade.py:481-492`）。
 * `UPG_CMD_CONFIRM`（升级窗命令 5）在 boot 模式**总是报 `STATE`**，不要用它（§10.3）。
 * 不显式确认也可以：应用跑够 30 s（期间至少答过一次总线帧）会自己确认（§10.6）。
 
@@ -1043,7 +1054,7 @@ write(U_TARGET, target)
 write(U_CMD, 6)
 ```
 bootloader 清 `boot_stay`、复位；主机轮询身份窗直到 `UID_MODE` 变回 0（应用）
-（`host/upgrade.py:473-477,749-763`）。
+（`host/upgrade.py:661-665,878-892`）。
 
 **幂等性小结**：`seq == ack_seq` 的重传是幂等的（重复编程同一偏移、同样内容）；
 `READBACK` 是可重复的只读操作；`ABORT` 不改已写 Flash；`BEGIN` **不幂等**（它会擦除并重置
@@ -1054,13 +1065,13 @@ bootloader 清 `boot_stay`、复位；主机轮询身份窗直到 `UID_MODE` 变
 | 事件 | 结果 | 出处 |
 |---|---|---|
 | `UPG_END` 提交成功 | 配置页：`trial_slot = 目标槽`、`attempts = 0`、`pingpong +1`、`boot_stay = 0` | `src/boot_regs.c:42-52` |
-| 复位且存在有效 trial 槽、`attempts < 3` | 运行该槽，`attempts + 1`，**且在跳转前持久化** | `src/boot_decide.c:41-47`；`src/boot_main.c:377-389` |
-| 应用连续运行 ≥ **30 s**（`BOOT_CONFIRM_MS`）且期间答过至少一次总线帧 | 自我确认：`boot_slot = 自己`、`trial_slot = 无`、`attempts = 0`、`pingpong +1`，写配置页 | `src/board.h:168`；`src/dev.c:479-499,460-477` |
-| 应用运行 ≥ **60 s**（`BOOT_CONFIRM_LONE_MS`）但从未收到主机帧 | 同样确认（否则一台没人理的机器人会永远回滚） | `src/board.h:169`；`src/dev.c:491-496` |
-| `attempts` 达到 **3** 仍未确认 | **放弃 trial、回滚**到上一个已确认槽，`attempts` 清零 | `src/board.h:167`；`src/boot_decide.c:48-57` |
+| 复位且存在有效 trial 槽、`attempts < 3` | 运行该槽，`attempts + 1`，**且在跳转前持久化** | `src/boot_decide.c:41-47`；`src/boot_main.c:389-401` |
+| 应用连续运行 ≥ **30 s**（`BOOT_CONFIRM_MS`）且期间答过至少一次总线帧 | 自我确认：`boot_slot = 自己`、`trial_slot = 无`、`attempts = 0`、`pingpong +1`，写配置页 | `src/board.h:175`；`src/dev.c:479-499,460-477` |
+| 应用运行 ≥ **60 s**（`BOOT_CONFIRM_LONE_MS`）但从未收到主机帧 | 同样确认（否则一台没人理的机器人会永远回滚） | `src/board.h:176`；`src/dev.c:491-496` |
+| `attempts` 达到 **3** 仍未确认 | **放弃 trial、回滚**到上一个已确认槽，`attempts` 清零 | `src/board.h:174`；`src/boot_decide.c:48-57` |
 | 主机显式确认 | 厂商窗 `V_CMD = 5` | `src/dev.c:286-288` |
 | 主机显式切槽 | 厂商窗 `V_CMD = 7`，下次复位跑另一个槽 | `src/dev.c:512-525` |
-| 配置页写失败且 `attempts+1 >= 3` | 在 RAM 中**强制改用回滚决策**，不等下次写入成功 | `src/boot_main.c:381-389` |
+| 配置页写失败且 `attempts+1 >= 3` | 在 RAM 中**强制改用回滚决策**，不等下次写入成功 | `src/boot_main.c:393-401` |
 
 **为什么这套设计不会变砖 / 不会擦掉最后一个可启动镜像**（三条独立保证）：
 
@@ -1070,11 +1081,11 @@ bootloader 清 `boot_stay`、复位；主机轮询身份窗直到 `UID_MODE` 变
    升级路径里**不可达**。
 2. **绝不擦最后一个可启动镜像**：`BEGIN` 拒绝"目标槽 == bootloader 将要运行的槽、且另一个槽
    不可启动"的组合（`src/boot_upgrade.c:159-164`；`src/boot_main.c:176-181` 提供
-   `other_bootable`）。主机侧也会主动避开正在运行的槽（`host/upgrade.py:696-730`）。
+   `other_bootable`）。主机侧也会主动避开正在运行的槽（`host/upgrade.py:884-918`）。
 3. **失败有退路**：应用头由打包工具写好、节点只回读校验（节点**不重写**头，见 §10.7）；
    每块都有独立 CRC-16 与写后回读；整镜像有两段 CRC-32；trial 计数在跳转前持久化，写失败也
    在 RAM 里强制回滚；两个槽都不可启动时 bootloader **无限期**停在 boot 模式等主机刷机
-   （`src/boot_main.c:274,312-317`——`any_bootable == 0` 时不设 idle 超时）。
+   （`src/boot_main.c:274,324-329`——`any_bootable == 0` 时不设 idle 超时）。
 
 ### 10.7 固件包格式（`.ipkg`）
 
@@ -1120,14 +1131,14 @@ payload 本身是一个**完整的槽镜像**：`[0x000]` 向量表、`[0x200]` 
 
 * `crc_low` / `crc_high` 是 bootloader 每次启动都要算的"两段独立校验"（头自身不参与，避免自指）；
 * `payload_crc32 = zlib.crc32(high, zlib.crc32(low))`，即两段**按顺序拼接**后的一个 CRC-32；
-  它同时是 `.ipkg` 的 `payload_crc32` 和升级时写入 `U_IMGCRC` 的值（`host/upgrade.py:513`）；
+  它同时是 `.ipkg` 的 `payload_crc32` 和升级时写入 `U_IMGCRC` 的值（`host/upgrade.py:701`）；
 * `full_crc32` 只用于包文件完整性（防下载截断），节点不校验它。
 
 **节点在 `UPG_END` 验证的东西**（`src/boot_upgrade.c:262-305`）：
 整镜像 CRC-32 == `U_IMGCRC`；`app_header_check()` 全过；`h.image_size == U_IMGLEN`；
 `U_VER != 0` 时 `h.image_version == U_VER`；entry 落在目标槽内。
 
-**节点不重写应用头**（`src/boot_upgrade.c:280-288`；`docs/upgrade.md:208-209`）：头由打包工具
+**节点不重写应用头**（`src/boot_upgrade.c:280-288`；`docs/upgrade.md:256-257`）：头由打包工具
 写好（头不参与两段 CRC），节点只回读校验。原因：Flash 只能把 1 写成 0，节点重写可能写不进
 "更新"的位（例如把 `CONFIRMED` 改回 `TRIAL` 需要把 0 置 1）。
 
@@ -1135,19 +1146,21 @@ payload 本身是一个**完整的槽镜像**：`[0x000]` 向量表、`[0x200]` 
 
 | 子命令 | 用途 | 关键选项 | 出处 |
 |---|---|---|---|
-| `info <pkg>` | 打印包全部元数据 | — | `host/upgrade.py:600-610` |
-| `verify <pkg>` | 只校验包，0 = 可用 / 1 = 不可用 | — | `host/upgrade.py:959-973` |
-| `status [pkg]` | 读节点身份窗 + 版本比较（UPGRADE/SAME/DOWNGRADE） | `--allow-downgrade`、`--target` | `host/upgrade.py:613-638` |
-| `upgrade <pkg>` | 完整升级 | `--slot a\|b`、`--allow-downgrade`、`--force`、`--force-target`、`--no-enter-boot`、`--reboot/--no-reboot`、`--confirm`、`--reboot-timeout`、`--boot-timeout`、`--retries`、`--dry-run` | `host/upgrade.py:661-770,898-925` |
-| `boot` | 让应用复位进 bootloader 并停住 | `--boot-timeout` | `host/upgrade.py:805-817` |
-| `confirm` | 立即确认当前 trial 镜像 | — | `host/upgrade.py:788-802` |
-| `abort` | 丢弃正在进行的会话 | — | `host/upgrade.py:820-832` |
-| `readback` | 通过 bootloader 回读 Flash | `--slot`、`--offset`、`--length`、`--output` | `host/upgrade.py:835-855` |
+| `info <pkg>` | 打印包全部元数据 | — | `host/upgrade.py:788-798` |
+| `verify <pkg>` | 只校验包，0 = 可用 / 1 = 不可用 | — | `host/upgrade.py:1158-1172` |
+| `status [pkg]` | 读节点身份窗 + 版本比较（UPGRADE/SAME/DOWNGRADE） | `--allow-downgrade`、`--target` | `host/upgrade.py:801-826` |
+| `upgrade <pkg>` | 完整升级 | `--slot a\|b`、`--allow-downgrade`、`--force`、`--force-target`、`--no-enter-boot`、`--reboot/--no-reboot`、`--confirm`、`--reboot-timeout`、`--boot-timeout`、`--retries`、`--dry-run` | `host/upgrade.py:849-963,1038-1065` |
+| `boot` | 让应用复位进 bootloader 并停住 | `--boot-timeout` | `host/upgrade.py:998-1010` |
+| `confirm` | 立即确认当前 trial 镜像 | — | `host/upgrade.py:981-995` |
+| `abort` | 丢弃正在进行的会话 | — | `host/upgrade.py:1013-1025` |
+| `readback` | 通过 bootloader 回读 Flash | `--slot`、`--offset`、`--length`、`--output` | `host/upgrade.py:1028-1048` |
 
-公共选项：`--port`（默认 `/dev/ttyUSB0`）、`--baud`（默认 1000000）、`--id`（默认 200）、
-`--protocol auto|dxl|fee`、`--timeout`、`--quiet`（`host/upgrade.py:861-872`）。
+公共选项：`--port`（默认 `auto`：**逐个探测** `ttyACM0-1`、`ttyUSB0-5`、`ttyS2` 里存在的
+设备，取第一个真能应答节点的那个并打印它是谁；存在的 `ttyUSB*` 不按名字排除）、
+`--allow-busy`（默认拒绝打开别人占着的端口）、`--baud`（默认 1000000）、`--id`（默认 200）、
+`--protocol auto|dxl|fee`、`--timeout`、`--quiet`（`host/upgrade.py:1113-1130`）。
 退出码：0 成功 / 1 包不可用 / 2 目标槽或节点状态不允许 / 3 版本更旧且未允许 / 4 升级成功但
-节点没回到应用态 / 5 总线或协议错误（`docs/upgrade.md:142-143`）。
+节点没回到应用态 / 5 总线或协议错误（`docs/upgrade.md:161-162`）。
 
 ---
 
@@ -1198,7 +1211,7 @@ CRC-16 = **`0x87AB`**（低字节在前：`AB 87`）。
 FF FF FD 00 C8 18 00 55 00 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 70 4C
 ```
 
-（`docs/bus_timing_borrow_plan.md:597-598` 给出另一个已核对向量：16 ID 指令帧 240 µs、
+（`docs/bus_timing_borrow_plan.md:602-603` 给出另一个已核对向量：16 ID 指令帧 240 µs、
 单应答帧（15 字节块）210 µs。）
 
 ### (c) Dynamixel `sync_read` 覆盖节点 + 舵机
@@ -1373,7 +1386,7 @@ Fee 数据帧：FF FF C8 13 03 F0 68 20 00 20 85 CB 00 08 CD CB 00 08 CD CB 00 0
 
 15. **节点寄存器里的固件版本与镜像头版本号不是同一个数。**
     例子：寄存器报 1.0（`0x10`），身份窗/镜像头报 1.2.0。判断"该不该升级"要用身份窗的
-    `image_version` + `imgcrc`（`host/upgrade.py:553-583`），不要只比寄存器 6（§13.1）。
+    `image_version` + `imgcrc`（`host/upgrade.py:741-771`），不要只比寄存器 6（§13.1）。
 
 ---
 
@@ -1386,12 +1399,12 @@ Fee 数据帧：FF FF C8 13 03 F0 68 20 00 20 85 CB 00 08 CD CB 00 08 CD CB 00 0
 | 固件版本常量（编进寄存器） | **1.0**（`FW_VERSION_MAJOR=1`、`MINOR=0`） | `src/board.h:49-50` |
 | Dynamixel 固件版本寄存器 6 | **`0x10`**（高半字节主、低半字节次） | `src/board.h:51-53`；`src/dev.c:154` |
 | FeeTech 固件版本寄存器 0/1 | **1 / 0** | `src/dev.c:190-191` |
-| `APP_VERSION` 宏默认 | `APP_VERSION_MAKE(1,0,0)` = `0x1000` | `src/board.h:146` |
+| `APP_VERSION` 宏默认 | `APP_VERSION_MAKE(1,0,0)` = `0x1000` | `src/board.h:153` |
 | **升级镜像头版本（当前构建产物）** | **1.2.0**（`image_version = 4608 = 0x1200`，`image_size = 24712`，`payload_crc32 = 0xF68DF42D`，`flags = 1` trial） | `build/gd32f303cc_imu_to_dxl_slot_a.json`；`build/CMakeCache.txt:21`（`APP_VERSION_STR=1.2.0`） |
-| 打包工具默认版本 | 字符串 `APP_VERSION_STR`，CMake 默认 `"1.0.0"` | `CMakeLists.txt:70,251` |
+| 打包工具默认版本 | 字符串 `APP_VERSION_STR`，CMake 默认 `"1.0.0"` | `CMakeLists.txt:71,252` |
 
 > **注意**：`image_version` 由打包工具 `host/package.py pack --version ${APP_VERSION_STR}`
-> 写进 64 字节应用头（`CMakeLists.txt:251`），而 Dynamixel 寄存器 6 / FeeTech 寄存器 0/1
+> 写进 64 字节应用头（`CMakeLists.txt:252`），而 Dynamixel 寄存器 6 / FeeTech 寄存器 0/1
 > 来自 `src/board.h` 的 `FW_VERSION_*`。两者是**独立的两个版本来源**，可以不一致；当前仓库
 > 构建产物就是"寄存器 1.0 / 镜像头 1.2.0"。主机做版本决策时以身份窗的 `image_version`
 > 为准（§9、§10.8）。
@@ -1402,19 +1415,19 @@ Fee 数据帧：FF FF C8 13 03 F0 68 20 00 20 85 CB 00 08 CD CB 00 08 CD CB 00 0
 |---|---|---|
 | Dynamixel 协议 | **2.0**（`FF FF FD 00` + CRC-16 + 填充） | `src/dxl2.h:8-11`；协议类型寄存器 13 = 2，`src/dev.c:161` |
 | FeeTech | **SCS/HLS** 家族协议（无版本号；HD-1910-C001，fw 3.46 为真机对照） | `src/fee.h:1-13`；`docs/bus_timing_borrow_plan.md §1.1` |
-| 应用头格式 | `APP_HDR_VERSION = 1`，magic `AHM1` | `src/board.h:127-128` |
-| 总线升级协议 | `APP_PROTO_VERSION = 1`（写在应用头 30..31，不匹配则拒） | `src/board.h:134`；`src/app_header.c:224-226` |
+| 应用头格式 | `APP_HDR_VERSION = 1`，magic `AHM1` | `src/board.h:134-135` |
+| 总线升级协议 | `APP_PROTO_VERSION = 1`（写在应用头 30..31，不匹配则拒） | `src/board.h:141`；`src/app_header.c:224-226` |
 | 配置页 blob | `CFG_VERSION = 2`（v1 视为无效并用默认值） | `src/cfg_blob.h:32`；`docs/flash_layout.md §9.1` |
 | `.ipkg` 容器格式 | `PKG_FORMAT_VERSION = 1`，magic `IUP1`，头长 32 | `host/package.py:64-66` |
-| 身份窗扩展版本 | `UID_INFO_VERSION_1 = 1` | `src/board.h:203` |
-| RAM 握手字 | `BOOT_RAM_MAGIC = 0x544F4F42`（'BOOT'）@ `0x2000BF00` | `src/board.h:162-163` |
-| bootloader 身份 | DXL 型号 `0xB007` / FeeTech 型号 `0x00B7` | `src/board.h:153-154` |
+| 身份窗扩展版本 | `UID_INFO_VERSION_1 = 1` | `src/board.h:210` |
+| RAM 握手字 | `BOOT_RAM_MAGIC = 0x544F4F42`（'BOOT'）@ `0x2000BF00` | `src/board.h:169-170` |
+| bootloader 身份 | DXL 型号 `0xB007` / FeeTech 型号 `0x00B7` | `src/board.h:160-161` |
 
 ### 13.3 主机如何探测能力
 
 * **扩展能力位**：读身份窗偏移 **11**（绝对 191）`UID_INFO_VERSION`。**== 1** 表示偏移
   12..15（`boot_slot / trial_slot / attempts / boot_stay`）有效；老固件为 0，主机应显示
-  "unknown"而不是读那 4 个字节（`src/board.h:191-203`；`host/upgrade.py:60-68,249-253`）。
+  "unknown"而不是读那 4 个字节（`src/board.h:198-210`；`host/upgrade.py:82-86,437-441`）。
 * **模式**：`UID_MODE` = 0/1（应用/bootloader）。
 * **是否打包过**：`UID_FLAGS` 的 bit7（`UID_FLAG_NO_HEADER`）。
 * **是否 trial**：`UID_FLAGS` 的 bit0（由配置页折算）。
@@ -1475,18 +1488,18 @@ CLI 的 pty 端到端，173 断言）、`host/tools/test_crc16.c` / `test_crc32.
 
 ### 15.3 错误码总表
 
-**Dynamixel 错误位**（`ERR` 字节，`src/board.h:382-388`）：`0x80` Result Fail、
+**Dynamixel 错误位**（`ERR` 字节，`src/board.h:389-395`）：`0x80` Result Fail、
 `0x40` Instruction、`0x20` CRC、`0x10` Range、`0x08` Length、`0x04` Limit、`0x02` Access
 （详见 §5.3）。
 
-**升级错误码**（`U_ERRCODE`，`src/board.h:281-289`）：1 = 块 CRC、2 = 越界/乱序、
+**升级错误码**（`U_ERRCODE`，`src/board.h:288-296`）：1 = 块 CRC、2 = 越界/乱序、
 3 = Flash、4 = 状态机、5 = 目标槽、6 = 缺 magic、7 = 镜像校验、8 = 长度
 （详见 §10.4）。
 
 **升级状态**：0 idle / 1 erased / 2 receiving / 3 block ok / 4 verified / 5 committed，
-`0x80` 位 = 错误（`src/board.h:273-279`）。
+`0x80` 位 = 错误（`src/board.h:280-286`）。
 
-**厂商窗 `V_LAST_ERR`**：存放最近一次 `DXL_ERR_*`（`src/board.h:479-483`）。
+**厂商窗 `V_LAST_ERR`**：存放最近一次 `DXL_ERR_*`（`src/board.h:486-490`）。
 
 **应用头校验错误**（`APP_HDR_ERR_*`，`src/app_header.h:59-69`）：1 magic、2 header 版本、
 3 size、4 对齐、5 entry、6 crc_low、7 crc_high、8 board、9 proto、10 no-boot
@@ -1532,7 +1545,7 @@ CLI 的 pty 端到端，173 断言）、`host/tools/test_crc16.c` / `test_crc32.
 3. **GD32F303 数据手册的页擦除时间上限**。仓库用的是"≈25 ms/页"的实测/估算，并明确写着
    "未查 GD32F303 数据手册的页擦除时间上限"（`docs/flash_layout.md:783-784`）。
 4. **96 KB 满槽真机升级、擦除中途/写一半掉电演练**。仓库明确写着未在真机验证
-   （`docs/upgrade.md:278-283`、`docs/flash_layout.md §9.5`）。
+   （`docs/upgrade.md:311-332`、`docs/flash_layout.md §9.5`）。
 5. **在 `sync_read` 里把本节点排在 ID 列表中间/末尾时"按槽让位不撞包"的直接波形验证**。
    只有"前导 ID 全缺席"的间接验证（`docs/bus_timing_borrow_plan.md §7.3, §8`）。
 6. **飞特 ACK STATUS 字节在舵机异常时的取值**。厂商手册未定义，参考库也不检查
@@ -1550,24 +1563,25 @@ CLI 的 pty 端到端，173 断言）、`host/tools/test_crc16.c` / `test_crc32.
 ### 15.6 与现有文档的差异
 
 以下是撰写本文时发现的**现有文档/注释与源码不一致**之处。本文一律以源码为准，并把两边值
-都列出来，供后续修正文档：
+都列出来。其中几条已经改掉了，原样保留并标注「**已修正**」：一是留个记录，二是免得有人
+再"发现"一次。**未标注的都是当前仍然存在的差异**：
 
 | # | 项目 | 说法 A（出处） | 说法 B（出处） | 源码事实 |
 |---|---|---|---|---|
-| 1 | `UPG_END` 是否由节点写应用头 | "节点写 `app_header_t`（flags=TRIAL）"（`docs/flash_layout.md §5.3` 表格行） | "`UPG_END` **不重写**镜像头，节点只校验"（`docs/flash_layout.md §9.1`、`docs/upgrade.md:208-209`） | **不重写**（`src/boot_upgrade.c:280-288`） |
-| 2 | 升级会话超时与块 ACK 参数 | "500 ms 无完整帧 → STATUS=2；DXL 块 ACK 带 4 字节 `ack_seq,status,ack_crc`；Fee 带 2 字节"（`docs/flash_layout.md §5.3-5.5`） | — | 无 500 ms 超时（boot 模式靠 30 s idle，`src/boot_main.c:312-317`）；ACK 无额外参数，主机读状态窗；`UPG_ACK_CRC` 已被 `UPG_NODE_CRC`(227..230) 取代（`docs/flash_layout.md §9.1` 自己也这么修正了） |
-| 3 | `UPG_BLKLEN` 范围 | "1..16"（`docs/flash_layout.md §5.2`、`docs/upgrade.md §5.3`） | — | **4..16 且必须是 4 的倍数**（`src/board.h:260-261`、`src/boot_upgrade.c:472-478`） |
-| 4 | FeeTech 型号 | `0x0C00`（`飞特通讯协议说明.md §10.1`） | `0x4D49`（'I','M'）（`README.md:132`、`src/board.h:316-322`） | **`0x4D49`**（`src/dev.c:192`） |
-| 5 | FeeTech 地址 56 的块长 | "56~75 是 20 字节遥测块"（`飞特通讯协议说明.md §10.2`） | "56..70 是 15 字节契约块，完整 20 字节在 128"（`README.md:104-109`、`docs/bus_timing_borrow_plan.md §0 D1`） | **15 字节契约块**（`src/telem_pack.c:10-16`、`src/board.h:440-443`） |
-| 6 | 协议粘滞窗口 | "1 秒内粘在该协议上"（`飞特通讯协议说明.md §9`） | "已从 1 s 改为 100 ms"（`README.md:385-386`、`docs/bus_timing_borrow_plan.md §7.2`） | **100 ms**（`src/bus.h:46`） |
+| 1 | `UPG_END` 是否由节点写应用头 | "节点写 `app_header_t`（flags=TRIAL）"（`docs/flash_layout.md §5.3` 表格行） | "`UPG_END` **不重写**镜像头，节点只校验"（`docs/flash_layout.md §9.1`、`docs/upgrade.md:256-257`） | **不重写**（`src/boot_upgrade.c:280-288`） |
+| 2 | 升级会话超时与块 ACK 参数 | "500 ms 无完整帧 → STATUS=2；DXL 块 ACK 带 4 字节 `ack_seq,status,ack_crc`；Fee 带 2 字节"（`docs/flash_layout.md §5.3-5.5`） | — | 无 500 ms 超时（boot 模式靠 30 s idle，`src/boot_main.c:324-329`）；ACK 无额外参数，主机读状态窗；`UPG_ACK_CRC` 已被 `UPG_NODE_CRC`(227..230) 取代（`docs/flash_layout.md §9.1` 自己也这么修正了） |
+| 3 | `UPG_BLKLEN` 范围 | "1..16"（`docs/flash_layout.md §5.2`、`docs/upgrade.md §5.3`） | — | **4..16 且必须是 4 的倍数**（`src/board.h:267-268`、`src/boot_upgrade.c:472-478`）。**已修正**：这两处文档已改成 4..16。注意 readback（`UPG_CMD_READBACK`）确实接受 1..16，与块写不同 |
+| 4 | FeeTech 型号 | `0x0C00`（`飞特通讯协议说明.md §10.1`） | `0x4D49`（'I','M'）（`README.md:132`、`src/board.h:323-329`） | **`0x4D49`**（`src/dev.c:192`） |
+| 5 | FeeTech 地址 56 的块长 | "56~75 是 20 字节遥测块"（`飞特通讯协议说明.md §10.2`） | "56..70 是 15 字节契约块，完整 20 字节在 128"（`README.md:104-108`、`docs/bus_timing_borrow_plan.md §0 D1`） | **15 字节契约块**（`src/telem_pack.c:10-16`、`src/board.h:447-450`） |
+| 6 | 协议粘滞窗口 | "1 秒内粘在该协议上"（`飞特通讯协议说明.md §9`） | "已从 1 s 改为 100 ms"（`README.md:416-417`、`docs/bus_timing_borrow_plan.md §7.2`） | **100 ms**（`src/bus.h:47`） |
 | 7 | FeeTech 自定义 STATUS 码 | "0x01 访问错误 / 0x02 越界 / 0x04 长度 / 0x08 其它"（`飞特通讯协议说明.md §10.4`） | "ACK STATUS 恒 0"（`README.md:133`、`src/fee.c:15-20`） | **恒 0**，错误只进 `V_LAST_ERR`（`src/fee.c:20-35`） |
 | 8 | hls 波特率码范围 | HLS 手册 0..7（`飞特通讯协议说明.md §8`） | 固件接受 0..11（`src/dev.c:76-79`） | `fee_baud_code_valid()` 接受 `<= 11`（`src/dev.c:600-605`） |
-| 9 | 自收自播窗口 | "发送后 2 字节"（`src/bus.h:56-60` 的 `BUS_ECHO_SKIP_BYTES`、`docs/flash_layout.md §9.6`） | "改成时间锚定的 3 个字节时间窗口"（`docs/bus_timing_borrow_plan.md §4.6.1`、`src/uart_port.h:22-34`） | **`UART_ECHO_WINDOW_BYTES = 3` 的时间窗**；`BUS_ECHO_SKIP_BYTES` 是**未被引用的死常量**（`src/bus.h:60`，`src/` 中无使用者） |
-| 10 | `flags` bit7 的命名 | "融合收敛"（`README.md:100`） | "`FUSION_OK` = 融合算法正在运行，不是已收敛"（`src/imu_spi.c:603-607`） | 位名 `TELEM_FLAG_FUSION_OK`，语义是"算法在跑"（`src/board.h:503`） |
+| 9 | 自收自播窗口 | "发送后 2 字节"（`docs/flash_layout.md §9.6`） | "改成时间锚定的 3 个字节时间窗口"（`docs/bus_timing_borrow_plan.md §4.6.1`、`src/uart_port.h:22-34`） | **`UART_ECHO_WINDOW_BYTES = 3` 的时间窗**。**已修正**：文档里那个从未被引用的 `BUS_ECHO_SKIP_BYTES` 死常量已从 `src/bus.h` 删除，`docs/flash_layout.md` §9.6 的历史行也加了时间窗的注 |
+| 10 | `flags` bit7 的命名 | "融合收敛"（`README.md:100`） | "`FUSION_OK` = 融合算法正在运行，不是已收敛"（`src/imu_spi.c:603-607`） | 位名 `TELEM_FLAG_FUSION_OK`，语义是"算法在跑"（`src/board.h:510`）。**已修正**：`README.md` 的状态位表已改成"融合算法正在运行（`FUSION_OK`，不等于已收敛）"，bit0 也补上了"本块带四元数" |
 | 11 | 加速度的坐标系一致性 | —（文档未提） | — | 真驱动在 `REPORT_FRAME=1` 时**不旋转加速度**（`src/imu_spi.c:553-594`），模拟器**会旋转**（`src/imu_sim.c:196-205`） |
-| 12 | `bus.py` 的厂商窗偏移 19 | 参考实现里叫 `"reserved"`（`host/bus.py:82`） | 源码里是 `V_LAST_ERR`（`src/board.h:479-483`） | `host/bus.py` 的 `VOFF` 未同步；它也缺 `VCMD_CONFIRM/BOOT/SWITCH_SLOT`（`host/bus.py:86-90`） |
+| 12 | `bus.py` 的厂商窗偏移 19 | 参考实现里叫 `"reserved"`（`host/bus.py:82`） | 源码里是 `V_LAST_ERR`（`src/board.h:486-490`） | `host/bus.py` 的 `VOFF` 当时未同步，也缺 `VCMD_CONFIRM/BOOT/SWITCH_SLOT`。**已修正**：现在偏移 19 就叫 `last_err`，三个命令码也补齐了（`host/bus.py:82-97`） |
 | 13 | `docs/dynamixel_slave.md` 的 STATUS_RETURN_LEVEL | "0 = 只有 PING；1 = PING + READ/SYNC_READ；2 = 全部"（`docs/dynamixel_slave.md:86-87`） | — | level 0/1 仍会应答 REG_WRITE/ACTION/FACTORY_RESET/REBOOT；level 0 的 WRITE/CLEAR 静默（`src/dxl2.c`，§5.1 的精确表） |
-| 14 | 悬空引用 | `src/fee.h:17` 指向 `docs/fee_tech_protocol.md` | — | 该文件在仓库中**不存在** |
+| 14 | 悬空引用 | `src/fee.h:17` 指向 `docs/fee_tech_protocol.md` | — | 该文件在仓库中**不存在**。**已修正**：改指 `docs/imu_to_dxl_protocol.md` §7 与 `docs/飞特通讯协议说明.md` |
 | 15 | 固件版本 vs 镜像版本 | 寄存器报 1.0（`src/board.h:49-50`） | 当前构建镜像头报 1.2.0（`build/CMakeCache.txt:21`、`build/gd32f303cc_imu_to_dxl_slot_a.json`） | 两个独立版本来源（§13.1），不是笔误 |
 
 ---

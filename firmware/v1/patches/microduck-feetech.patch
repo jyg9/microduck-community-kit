@@ -401,7 +401,7 @@ index 2b1aa64..0066de6 100644
 +/// The first [`IMU_BLOCK_LEN`] bytes of the IMU node's status block.
 +///
 +/// The node answers the servo status address (56) with its telemetry map, which on this board
-+/// is 20 bytes long (`imu_block_bytes()` in `soft_imu_to_dxl/v1/src/imu.c`): the same 12-byte
++/// is 20 bytes long (`imu_block_bytes()` in `firmware/v1/src/imu.c`): the same 12-byte
 +/// SFLP payload the old Dynamixel read consumed, followed by its diagnostic tail — raw
 +/// accelerometer, a sample counter and status flags. The tick asks for the 15 bytes the servos
 +/// need, so bytes 12..15 of that tail arrive along with it and are deliberately ignored.
@@ -1784,7 +1784,7 @@ index 0000000..9e47ce5
 +//! This module is deliberately dependency-free: it is pure framing and
 +//! conversion code with unit tests, so it can be dropped into `duck-control`
 +//! (or any other crate) without pulling anything in. See
-+//! `soft_imu_to_dxl/v1/patches/microduck_feetech_patch.md` for how `bus.rs`
++//! `firmware/v1/patches/microduck_feetech_patch.md` for how `bus.rs`
 +//! uses it, and `飞特通讯协议/飞特通讯协议说明.md` for the protocol write-up.
 +//!
 +//! Frame layout (all little endian for multi-byte fields):
@@ -2409,7 +2409,7 @@ index ef1f144..dadafdb 100644
 -    ("shutdown", 52),
 -];
 +/// FeeTech HLS baud code 0 is 1 Mbps (the `dev_fee_baud()` table in
-+/// `soft_imu_to_dxl/v1/src/dev.c`), and it must agree with [`BAUD_RATE`]. The HLS baud register
++/// `firmware/v1/src/dev.c`), and it must agree with [`BAUD_RATE`]. The HLS baud register
 +/// (address 6) is documented in the vendor memory table as ranging over only **0..7**
 +/// (0=1 Mbps, 1=500k, 2=250k, 3=128k, 4=115200, 5=76800, 6=57600, 7=38400), so any value outside
 +/// that set is a wrong baud code, not a faster bus. The XL330's

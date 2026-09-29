@@ -9,8 +9,9 @@
   节点 ID 200 挂在 1 Mbps 半双工伺服总线上（USART1，PA2/PA3）
 * 真板传感器：**LSM6DSV16X**（SPI0：PA4=CS / PA5=SCK / PA6=MISO / PA7=MOSI，INT1/INT2 = PB0/PB1），
   由 `IMU_USE_SPI=1`（默认）选 `src/imu_spi.c` + `src/lsm6dsv16x.h`；`=0` 时回到模拟器 `src/imu_sim.c`
-* 台架拓扑：PC 经 `/dev/ttyACM1` 接总线（15 颗 HD-1910-C001：右腿 10-14、左腿 20-24、颈/头/嘴 30-34）；
-  调试口/镜像 `/dev/ttyUSB0`（USART0，PB6/PB7，1 Mbps，`BUS_MIRROR_ENABLE=1`）
+* 台架拓扑：PC 经 USB 串口适配器接**电机总线**（USART1，PA2/PA3；15 颗 HD-1910-C001：右腿 10-14、
+  左腿 20-24、颈/头/嘴 30-34），适配器通常枚举成 `/dev/ttyACM0`（换 USB 口后先 `ls /dev/ttyACM*` 确认）；
+  调试口是 CH340 的 `/dev/ttyUSB*`（USART0，PB6/PB7，115200，**只输出 `DBG_*` 日志、不承载任何协议**）
 * 两种协议：**Dynamixel 2.0**（ID 200，地址 124）与**飞特 SCS/HLS**（ID 200，地址 56），节点自动识别
 * 上位机：`host/`（本地网页版，3D 姿态 + 实时瀑布流 + 抖动/偏移统计）
 
@@ -42,7 +43,7 @@
 | 寄存器镜像（XL330 控制表 + HLS 内存表 + 厂商窗口） | ✅ | C 测试 + 上位机读写 |
 | 片上温度 / 实时 tick / 状态位 | ✅ | 寄存器读取 |
 | 调试串口（可宏关闭、运行时可调级别） | ✅ | 上板（banner + 2 s 周期统计） |
-| USART0 作为调试口 + 总线镜像口 | ✅ | 见 §5；真 PCBA 上总线走 USART1，`/dev/ttyACM1` |
+| USART1 电机总线 + USART0 只输出日志的调试口 | ✅ | 见 §5；协议与升级只走总线（PC 侧通常 `/dev/ttyACM0`）；镜像口是默认关闭的台架选项 |
 | 配置存 Flash（ID/波特率/模拟参数） | ✅ | `src/dev.c`（最后一页 + CRC16） |
 | 上位机网页版（3D + 瀑布流 + 统计 + 录制 CSV） | ✅ | HTTP/WS 集成测试 + 前端桩测试（见 §7） |
 | **bootloader（32 KB）+ A/B slot 启动决策** | ✅ 已实现 | `host/tools/test_boot.c`（决策表全表）+ 真机启动 A/B/回滚 |
@@ -73,11 +74,11 @@
 
 | 引脚 | 功能 | 说明 |
 |---|---|---|
-| PA2 / PA3 | USART1 TX / RX | 电机总线（单线半双工）。方向控制由硬件从 TX 自动产生（原理图里的 `TXD_EN`，Q1+R28/R29/C22），固件不控制任何 GPIO |
+| PA2 / PA3 | USART1 TX / RX | **电机总线**（单线半双工）。节点与 15 颗舵机共用，全部寄存器协议流量与现场升级只在这里（PC 侧 USB 串口适配器，通常 `/dev/ttyACM0`）。方向控制由硬件从 TX 自动产生（原理图里的 `TXD_EN`，Q1+R28/R29/C22），固件不控制任何 GPIO |
 | PA4 | SPI0_NSS | IMU 片选（低有效）；`IMU_USE_SPI=1` 时由 `src/imu_spi.c` 驱动，传输间保持高 |
 | PA5 / PA6 / PA7 | SPI0_SCK / MISO / MOSI | IMU SPI，`IMU_USE_SPI=1` 时是 LSM6DSV16X 总线（mode 0 @ 7.5 MHz）；`=0` 时浮空不用 |
 | PB0 / PB1 | IMU INT1 / INT2 | LSM6DSV16X 上拉输入；驱动轮询，但已把 FIFO 水位/溢出路由到 INT1，留给将来中断或示波器 |
-| PB6 / PB7 | USART0 TX / RX | 调试串口 **兼**总线镜像口（`/dev/ttyUSB0`）；真 PCBA 上总线走 USART1，PC 经 `/dev/ttyACM1` |
+| PB6 / PB7 | USART0 TX / RX | **只输出调试日志**的串口（CH340，PC 侧 `/dev/ttyUSB*`，115200），不解析、不应答任何协议帧；`BUS_MIRROR_ENABLE=1` 时才是台架镜像口（见 §5） |
 | PB5 | 状态 LED（开发板） | 1 Hz 心跳；5 s 没收到总线帧则 8 Hz 闪（提示"没有主机在说话"） |
 
 时钟：`(HXTAL / 2) * 20 = 120 MHz`。**注意** GD32 官方 `system_gd32f30x.c` 默认按 8 MHz 晶振
@@ -96,7 +97,7 @@
 | 6~11 | 四元数 x/y/z，IEEE half（binary16） | `w = √(1-x²-y²-z²)` |
 | 12~17 | 加速度 x/y/z，i16 小端 | ±4 g，0.122 mg/LSB |
 | 18 | 采样计数（u8，回绕） | 100 Hz |
-| 19 | 状态位 | `0x01` SFLP 有效 / `0x02` 计数回绕 / `0x04` 陀螺饱和 / `0x08` 传感器错误 / `0x10` 模拟数据 / `0x20` 冻结 / `0x40` 配置未保存 / `0x80` 融合收敛 |
+| 19 | 状态位 | `0x01` SFLP 有效（本块带四元数）/ `0x02` 计数回绕 / `0x04` 陀螺饱和 / `0x08` 传感器错误 / `0x10` 模拟数据 / `0x20` 冻结 / `0x40` 配置未保存 / `0x80` 融合算法**正在运行**（`FUSION_OK`，不等于已收敛） |
 
 控制环只读**前 12 字节**（陀螺 + 四元数 xyz）——这正是官方板"与舵机共用地址、塞进同一事务"的做法。
 
@@ -155,18 +156,46 @@
 
 ---
 
-## 5. 调试口 / 总线镜像口（`/dev/ttyUSB0`）
+## 5. 调试口（只输出日志）与电机总线
 
-真 PCBA 上总线走 `USART1`（PA2/PA3 → PC 的 `/dev/ttyACM1`），调试口走 `USART0`（PB6/PB7 →
-`/dev/ttyUSB0`）；台架把 **USART0 同时当"总线镜像口"**，这样一块板子就能同时看调试文本与协议：
+**电机总线是 `USART1`（PA2/PA3）**：节点和 15 颗舵机共用它，单线半双工；所有寄存器协议流量
+（Dynamixel 2.0 / 飞特）与**现场升级**都只在这条总线上发生，别处没有。PC 侧是 USB 串口适配器，
+通常枚举成 **`/dev/ttyACM0`**（ACM 编号跟着适配器枚举走，换 USB 口/插别的设备后先
+`ls /dev/ttyACM*` 确认）；`host/`、`./build.sh smoke` 与 `host/upgrade.py` 都默认用它。
 
-* `USART1`（PA2/PA3）始终是真实电机总线，保持最终形态；
-* `USART0` 默认 1 Mbps，既输出调试文本，也接收并应答 Dynamixel/飞特帧；
-* 调试文本每行以 `#` 开头且**不会**在 20 ms 内有总线活动时输出，ASCII 里没有 `0xFF`，
-  所以主机的分帧器可以安全地在文本里重新同步；
-* 宏 `BUS_MIRROR_ENABLE=0` 可关掉镜像（此时 USART0 是纯 115200 调试口，不应答协议帧）。
+**调试口是 `USART0`（PB6/PB7）**：CH340，PC 侧是 `/dev/ttyUSB*`，115200，**只输出日志**，
+不承载任何协议——它不解析、也不应答协议帧，所以终端上敲的东西不会被当成总线帧。
+日志行以 `#` 开头、ASCII 里没有 `0xFF`（主机分帧器可以安全地在文本里重新同步）。
 
-生产构型只需 `BUS_MIRROR_ENABLE=0` 重新编译（调试口与总线分成两个 UART），协议层代码不用改。
+* `BUS_MIRROR_ENABLE`（`src/board.h`、`CMakeLists.txt`）现在**默认 0**，上面就是默认行为。
+* 只有在"开发板上电机总线还没接"的**台架**场景才把它设为 1：此时 `USART0` 临时兼作第二个
+  协议口（1 Mbps，波特率编码见 §6 的 `MIRROR_BAUD`），方便一块板子上同时看调试文本与协议。
+  注意这时的 `USART0` **什么都能做，包括升级**——协议层不区分端口。所以升级工具
+  `--port` 默认指向电机总线（`auto` 会打印它选了哪个设备，见 `docs/upgrade.md` §4.5），
+  不要指到调试口上去。
+* 升级端口由**工具**负责选对：默认 `--port auto` **逐个探测** `ttyACM0-1`、
+  `ttyUSB0-5`、`ttyS2` 里存在的设备，取第一个真的能应答节点的那个并打印它选了谁
+  （存在的 `ttyUSB*` 不会被按名字排除：它既可能是总线适配器，也可能是调试口，
+  按"能不能应答"判断）；同时**拒绝和另一个主机抢端口**（机器人上那是 robotd，
+  工具会打印 stop/upgrade/start 三行提示）。见 `docs/upgrade.md` §4.5。
+
+`./build.sh` 现在会在配置之后打印**有效的缓存选项**（`APP_SLOT APP_VERSION_STR BOOT_ENABLE
+DBG_ENABLE BUS_MIRROR_ENABLE IMU_USE_SPI`），`BUS_MIRROR_ENABLE=1` 时还会加一条 NOTE。
+CMake 的缓存会跨源码更新保留旧值，所以老的 `build/` 目录可能仍是台架镜像构建：
+如果摘要里是 1，用 `./build.sh clean`（或 `-DBUS_MIRROR_ENABLE=0`）重新配置。
+
+**调试口的物理引脚**（这块 PCBA 上是一个 4 pin 排针 **H1**；网表见 `hardware/imu_to_dxl`）：
+
+| H1 引脚 | 信号 | 说明 |
+|---|---|---|
+| 1 | `+3.3V` | |
+| 2 | `GND` | |
+| 3 | `DEBUG_RX` | **PB7**，经串阻 R10，R7 上拉到 3.3V |
+| 4 | `DEBUG_TX` | **PB6**，经串阻 R11 |
+
+**PC 侧适配器的 TX 必须接到 H1-3**。只接 GND + TX 的"两根线"接法能读到日志（TX 一路是通的），
+但节点收不到任何字节——日志里 `uart0 rx=0` 就是它的表现，`BUS_MIRROR_ENABLE=1` 的台架镜像模式
+也就无从谈起（这一点在真板上实测确认过）。
 
 ---
 
@@ -203,7 +232,7 @@
 | 8 | REPORT_FRAME | RW | 0 芯片系（默认，与真板一致）/ 1 躯干系 |
 | 9 | PROTO_LOCK | RW | 0 自动 / 1 仅 Dynamixel / 2 仅飞特 |
 | 10~15 | GYRO_BIAS_X/Y/Z | RW | i16，直接叠加到上报的陀螺原始计数（注入偏移或在线标定） |
-| 16 | MIRROR_BAUD | RW | 镜像口波特率编码（飞特编码表） |
+| 16 | MIRROR_BAUD | RW | USART0（调试口 / 台架镜像口）波特率编码（飞特编码表）。`BUS_MIRROR_ENABLE=0` 时 USART0 固定 115200 调试口；此寄存器与电机总线（USART1）无关 |
 | 17 | DBG_LEVEL | RW | 0 关 / 1 仅错误 / 2 启动+2 s 统计（默认）/ 3 每帧跟踪 |
 | 18 | STATUS | R | bit0 配置未保存 / bit1 来自 Flash / bit2 使用模拟数据 |
 | 19 | LAST_ERR | R | 最近一次被拒绝的协议操作（`DXL_ERR_*`）。应答 STATUS 恒 0，所以原因只能从这里问 |
@@ -223,7 +252,7 @@
 ## 7. 编译、烧录与测试
 
 ```bash
-cd ~/code/microduck/soft_imu_to_dxl/v1
+cd v1
 
 # 1) 构建（arm-none-eabi-gcc + cmake，无需网络）
 ./build.sh
@@ -244,14 +273,14 @@ host/tools/run_c_tests.sh                          # 只跑 C 部分
 
 # 4) 上板协议冒烟测试（需要串口；真/模拟两条路径，脚本读 TELEM_FLAG_SIMULATED 自动选）
 ./build.sh smoke
-BUS_PORT=/dev/ttyACM1 BUS_BAUD=1000000 ./build.sh smoke      # 真 PCBA 总线口
-BUS_PORT=/dev/ttyUSB0 BUS_BAUD=1000000 ./build.sh smoke      # 开发板/镜像口
+BUS_PORT=/dev/ttyACM0 BUS_BAUD=1000000 ./build.sh smoke      # 电机总线口（先 ls /dev/ttyACM* 确认编号）
+BUS_PORT=/dev/ttyUSB0 BUS_BAUD=1000000 ./build.sh smoke      # 仅台架镜像构建（BUS_MIRROR_ENABLE=1）
 
 # 4b) 真舵机只读探针（PING/READ/SYNC_READ，绝不写；见 docs/bus_timing_borrow_plan.md）
-./host/tools/py.sh host/tools/servo_probe.py --port /dev/ttyACM1 --repeat 21
+./host/tools/py.sh host/tools/servo_probe.py --port /dev/ttyACM0 --repeat 21
 
 # 4c) 真 LSM6DSV16X 只读表征探针（四元数/加速度/重力夹角/零偏/SFLP 重启；见 §8.6）
-./host/tools/py.sh host/tools/sensor_probe.py --port /dev/ttyACM1
+./host/tools/py.sh host/tools/sensor_probe.py --port /dev/ttyACM0
 
 # 5) 现场升级（详见 docs/upgrade.md）
 ./build.sh status  build/gd32f303cc_imu_to_dxl_slot_b.ipkg    # 需不需要升级？
@@ -270,7 +299,7 @@ BUS_PORT=/dev/ttyUSB0 BUS_BAUD=1000000 ./build.sh smoke      # 开发板/镜像�
 | `BOOT_ENABLE` | 1 | 1 = 同时构建 bootloader 与 A/B 两个 slot 镜像 |
 | `APP_VERSION_STR` | 1.0.0 | 打进镜像头与升级包的版本号（major.minor.patch） |
 | `DBG_ENABLE` | 1 | 0 = 完全去掉调试输出代码 |
-| `BUS_MIRROR_ENABLE` | 1 | 0 = USART0 只做调试口 |
+| `BUS_MIRROR_ENABLE` | 0 | **默认 0**：USART0 只做调试口（只输出日志）。1 = 台架选项（开发板尚未接电机总线时让 USART0 兼作协议口），升级会话仍只在电机总线上开放 |
 | `IMU_USE_SPI` | 1 | 1 = 真 LSM6DSV16X（`src/imu_spi.{c,h}` + `src/lsm6dsv16x.h`）；0 = 模拟器（`src/imu_sim.c`） |
 | `STATUS_LED_ENABLE` | 1 | 0 = 无 PB5 心跳灯 |
 | `CFG_FLASH_ENABLE` | 1 | 0 = 不写 Flash（配置只存 RAM） |
@@ -298,14 +327,17 @@ dev 26.1 KB / slot 26.7 KB (28%) / boot 18.7 KB (58%)，见 `docs/bus_timing_bor
 所以 RAM 区在链接脚本里被拆成 `RAM`（48896 B）+ `BOOTRAM`（256 B）两块，并有
 `ASSERT(_sp <= 0x2000BF00)` 防止栈越界踩到它。
 
-> ⚠️ J-Link / `/dev/ttyUSB0` 在受限沙箱里不可见；烧录与串口测试需要在能访问 USB 的环境执行。
+> ⚠️ J-Link 与串口设备（电机总线 `/dev/ttyACM*`、调试口 `/dev/ttyUSB*`）在受限沙箱里不可见；
+> 烧录与串口测试需要在能访问 USB 的环境执行。
 
 ### 7.1 A/B 构型与现场升级（一句话版）
 
 量产构型是 **32 KB bootloader + 两个 96 KB 应用槽（A/B）**：bootloader 校验两个槽的
 镜像头（魔数/长度/entry/两段 CRC32/板号），按 `boot_slot` 与 trial 状态选一个跳转；
 新镜像先以 **trial** 启动，30 s 内没有自我确认就在 3 次尝试后**自动回滚**。
-升级通过电机总线完成（复用两种协议，不新增帧类型），由 `host/upgrade.py` 驱动：
+升级通过电机总线完成（复用两种协议，不新增帧类型；调试口 USART0 不参与升级，见 §5；
+机器人上这条总线是 `/dev/ttyS2`，升级前先 `sudo systemctl stop robotd` 让出总线），
+由 `host/upgrade.py` 驱动：
 
 ```
 verify  → 校验升级包（容器 CRC32 + 镜像头 + 两段 CRC32，坏包不上线）
@@ -332,13 +364,14 @@ upgrade → VCMD_BOOT 进 bootloader → 分块写（块 CRC + 序号 + 回读�
   以及固件厂商窗口的全部设置（模拟模式/幅度/频率/偏置/上报坐标系/调试级别/保存/恢复出厂/重启）。
 
 自检证据：`host/tools/test_server.py` 覆盖 HTTP + WebSocket 握手、坏串口报错、暂停往返；
-加 `--device /dev/ttyUSB0` 后还会在真板上验证**整链路**：连接 → 100 Hz 实时样本
-（所有前端字段齐全、四元数与重力单位性、时延 2.48 ms）→ 统计消息（采样率 100 Hz、0 超时/0 坏帧）→ 断开。
+加 `--device /dev/ttyACM0`（电机总线）后还会在真板上验证**整链路**：连接 → 100 Hz 实时样本
+（所有前端字段齐全、四元数与重力单位性）→ 统计消息（采样率 100 Hz、0 超时/0 坏帧）→ 断开。
+（该轮记录里的时延 2.48 ms 是台架镜像口 `/dev/ttyUSB0` 上的数字。）
 前端另有桩 DOM/WebGL 测试（协议帧解析、异常帧不崩、CSV 列数、统计单元、热力图出墨、3D 矩阵数值）。
 
 ---
 
-## 8.5 上板验证结果（GD32F303CC 开发板 + 模拟 IMU，`/dev/ttyUSB0`，1 Mbps）
+## 8.5 上板验证结果（GD32F303CC 开发板 + 模拟 IMU，台架镜像口 `/dev/ttyUSB0`，1 Mbps）
 
 固件烧录后 `host/tools/bus_smoke.py` **两种协议全部通过，0 超时、0 坏帧**：
 
