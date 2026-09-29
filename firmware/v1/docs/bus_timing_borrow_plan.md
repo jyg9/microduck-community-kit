@@ -684,3 +684,23 @@ BUS_PORT=/dev/ttyACM1 ./build.sh smoke         # 传感器感知的协议冒烟�
   传感器感知（真/模拟两条路径）；`host/tools/test_protocols.c` 增加 FIFO tag 回归；
 * 文档：本文件（§4.6、§7.6、§7.7）、`README.md`、`docs/real_robot_runbook.md`、
   `docs/lsm6dsv16x_driver_spec.md`（§8.1 实现状态）。
+
+### 补丁追平上游（2026-09-29）
+
+上游 `microduck` 从补丁基线 `5620aa2`（2026-09-08）前进到 `f0d934e`（2026-09-28，1130 个提交），
+补丁按新基线重新生成并重做移植；详见 `patches/microduck_feetech_patch.md`，要点：
+
+* **保留上游新增功能**：替代舵机自动收养（`missing_servos`/`replacement_target`/
+  `adopt_replacement`）、`bus.fast_sync_read` 键（在飞特总线上无效果，登记表与文档已写明）；
+* **`feetech.rs` 这次有改动**（此前几版都保持逐字节未动）：新增 `sign_magnitude(raw, bit)`，
+  删除 `le_i16`。厂商 `HLSCL::ReadSpeed`/`ReadCurrent` 与 `hls_servo_debugger` 都按
+  **符号-幅值**（BIT15 方向位）解读速度与电流，原补丁按 `i16` 读取，方向位置 1 时电流会差约
+  327 倍、速度在观测向量里同样错；这是本次修掉的真错误；
+* `bus.rs`：EEPROM 写（ID 5 / 波特率 6）改为 **先写 55=0 解锁、写值、再写 55=1 回锁**，
+  且改 ID 后回锁必须发给**新 ID**（老 ID 上的回锁没人应答，会留下未锁的舵机并报超时）；
+  `REBOOT_SETTLE` 从上游 XL330 的 500 ms 改为 **900 ms**（真机实测 823 ms）；
+* `Cargo.toml`/`Cargo.lock`：`rustypot 1.8.0` 及其依赖移除（上游为 fast sync read 升的版本，
+  飞特总线没有对应指令）；
+* 文档：`docs/design/robotd-design.md`（§1.1 加"本树带飞特补丁"提示、总线图、
+  `FeetechIo`、fast-sync-read 段落）与 `docs/design/simulation.md`、`deploy/robotd.toml`
+  已同步；其余仍描述 XL330 寄存器的段落见补丁说明的未决事项。

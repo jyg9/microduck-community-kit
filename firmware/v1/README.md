@@ -22,7 +22,8 @@
 > * `docs/lsm6dsv16x_driver_spec.md` —— 真 LSM6DSV16X 驱动规格（含 §8.1 CONVERGE 实现状态）
 > * `docs/bus_timing_borrow_plan.md` —— 总线时序风险分析 + 借鉴计划（**已实施**；真机缺陷见 §4.6，真机验证见 §7）
 > * `docs/real_robot_runbook.md` —— 真机运行手册（15 舵机 + ONNX 速度策略）
-> * `patches/microduck_feetech_patch.md` —— 官方 `microduck` 仓库飞特补丁说明
+> * `patches/microduck_feetech_patch.md` —— 官方 `microduck` 仓库飞特补丁说明（补丁文件同目录）
+> * `../../software/microduck_feetech/` —— 打好该补丁的官方 `microduck` 完整源码（可直接编译运行 `robotd`）
 > * `../../docs/飞特通讯协议说明.md` —— 飞特协议完整说明
 > * `host/README.md` —— 上位机使用说明
 
