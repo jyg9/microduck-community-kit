@@ -2,12 +2,13 @@
     \file    bus.h
     \brief   the two bus ports, protocol auto-detection, and the reply-slot rule
 
-    Port 0 is USART0 (PB6/PB7) - the debug console, and on the development
-    board also a mirror of the motor bus so the PC can speak Dynamixel/FeeTech
-    over /dev/ttyUSB0 before the real PCBA exists.
+    Port 0 is USART0 (PB6/PB7) - the debug console.  It only ever prints DBG_*
+    lines; `BUS_MIRROR_ENABLE` (board.h) turns it into a second bus port for
+    bench work on a board that has no motor bus wired yet.
     Port 1 is USART1 (PA2/PA3) - the real motor bus, half duplex, whose TX
     enable is generated in hardware from TX (`TXD_EN` in the schematic), so the
-    firmware only has to remember that it hears its own transmission.
+    firmware only has to remember that it hears its own transmission.  The
+    register protocol *and* the field upgrade run here and nowhere else.
 
     Auto-detection: a Dynamixel 2.0 frame starts `FF FF FD`, a FeeTech frame is
     `FF FF <id>` with id <= 0xFC, so the third byte decides.  After a frame is

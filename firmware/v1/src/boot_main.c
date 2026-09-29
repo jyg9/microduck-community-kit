@@ -286,9 +286,21 @@ static void boot_mode_serve(void)
         now = systick_get_ms();
         bus_poll(now);
 
-        if (bus_ms_since_rx(BUS_PORT_MAIN, now) < 20U
-            || bus_ms_since_rx(BUS_PORT_MIRROR, now) < 20U) {
-            s_last_frame_ms = now;
+        /* "The host is still there" is about the bus.  The console's receive
+           timestamps must not count: with the mirror off, bytes arriving on
+           USART0 are somebody typing at the debug console (or line noise), and
+           counting them would keep this node in boot mode for as long as that
+           goes on instead of handing the robot back after BOOT_IDLE_EXIT_MS. */
+        {
+            uint8_t host_active = (uint8_t)(bus_ms_since_rx(BUS_PORT_MAIN, now) < 20U);
+#if BUS_MIRROR_ENABLE
+            /* the bench link is the only other thing that can be a host */
+            host_active = (uint8_t)(host_active
+                                    || (bus_ms_since_rx(BUS_PORT_MIRROR, now) < 20U));
+#endif
+            if (0U != host_active) {
+                s_last_frame_ms = now;
+            }
         }
 
         if (boot_regs_reboot_pending(now) || upg_reboot_pending(now)) {

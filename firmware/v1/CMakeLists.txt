@@ -28,7 +28,8 @@ cmake_minimum_required(VERSION 3.10)
 #   BOOT_ENABLE       1 = also build the bootloader and both slot images
 #   APP_VERSION_STR   "major.minor.patch" stamped into the slot headers
 #   DBG_ENABLE        1 = debug console on USART0 (0 removes the code)
-#   BUS_MIRROR_ENABLE 1 = USART0 also answers protocol frames (bench link)
+#   BUS_MIRROR_ENABLE 1 = USART0 also answers protocol frames (bench only;
+#                         0, the default, leaves it a debug console)
 #   STATUS_LED_ENABLE 1 = PB5 heartbeat LED (development board)
 #   CFG_FLASH_ENABLE  1 = persist id/baud/sim settings in the last flash page
 #   TEMP_SENSOR_ENABLE 1 = read the on-chip temperature sensor
@@ -69,7 +70,7 @@ set_property(CACHE APP_SLOT PROPERTY STRINGS 0 1 2)
 set(BOOT_ENABLE "1" CACHE STRING "also build the bootloader and the two slot images")
 set(APP_VERSION_STR "1.0.0" CACHE STRING "image version stamped into the slot header")
 set(DBG_ENABLE "1" CACHE STRING "debug console on USART0")
-set(BUS_MIRROR_ENABLE "1" CACHE STRING "USART0 doubles as a bus port")
+set(BUS_MIRROR_ENABLE "0" CACHE STRING "USART0 doubles as a bus port (bench only)")
 set(STATUS_LED_ENABLE "1" CACHE STRING "PB5 heartbeat LED")
 set(CFG_FLASH_ENABLE "1" CACHE STRING "persist configuration in the last flash page")
 set(TEMP_SENSOR_ENABLE "1" CACHE STRING "read the on-chip temperature sensor")

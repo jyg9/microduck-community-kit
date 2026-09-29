@@ -176,7 +176,9 @@ void bus_init(void)
 
     memset(s_ports, 0, sizeof(s_ports));
 
-    /* port 0: debug console, and the bench bus mirror when enabled */
+    /* port 0: the debug console.  With the mirror off it is not fed to the
+       protocol slaves at all (see the loop below), so nothing typed at it - and
+       nothing a stray tool sends to it - can be taken for a bus frame. */
     s_ports[BUS_PORT_MIRROR].name = "uart0";
     s_ports[BUS_PORT_MIRROR].enabled = 1U;
     uart_port_init(&s_ports[BUS_PORT_MIRROR].port, DBG_USART, BUS_PORT_MIRROR,

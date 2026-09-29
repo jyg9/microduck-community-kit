@@ -154,10 +154,11 @@ static void stats_print(uint32_t now_ms)
              sim_name(cfg->sim_mode), (unsigned)cfg->sim_amp,
              (unsigned)cfg->sim_freq);
 #endif
-    DBG_INFO("  cfg id(dxl=%u fee=%u) baud(dxl=%u fee=%u mirror=%u) frame=%s lock=%s dirty=0x%02X",
+    DBG_INFO("  cfg id(dxl=%u fee=%u) baud(dxl=%u fee=%u console=%u) frame=%s lock=%s dirty=0x%02X",
              (unsigned)cfg->dxl_id, (unsigned)cfg->fee_id,
              (unsigned)uart_port_get_baud(bus_uart(BUS_PORT_MAIN)),
-             (unsigned)dev_fee_baud(), (unsigned)dev_mirror_baud(),
+             (unsigned)dev_fee_baud(),
+             (unsigned)uart_port_get_baud(bus_uart(BUS_PORT_MIRROR)),
              (cfg->report_frame ? "trunk" : "chip"), proto_name(cfg->proto_lock),
              (unsigned)dev_image(PROTO_DXL)[DXL_VENDOR_ADDR + V_STATUS]);
     DBG_INFO("  uart0 rx=%u tx=%u dropped=%u err=%u echo=%u frames=%u answered=%u proto=%s",
@@ -290,13 +291,13 @@ int main(void)
             last_seq = dev_cfg_seq();
             bus_apply_ports();
 #if IMU_USE_SPI
-            DBG_INFO("config applied: id=%u/%u frame=%s baud=%u mirror=%u",
+            DBG_INFO("config applied: id=%u/%u frame=%s baud=%u console=%u",
                      (unsigned)dev_cfg()->dxl_id, (unsigned)dev_cfg()->fee_id,
                      dev_cfg()->report_frame ? "trunk" : "chip",
                      (unsigned)uart_port_get_baud(bus_uart(BUS_PORT_MAIN)),
                      (unsigned)uart_port_get_baud(bus_uart(BUS_PORT_MIRROR)));
 #else
-            DBG_INFO("config applied: id=%u/%u sim=%s baud=%u mirror=%u",
+            DBG_INFO("config applied: id=%u/%u sim=%s baud=%u console=%u",
                      (unsigned)dev_cfg()->dxl_id, (unsigned)dev_cfg()->fee_id,
                      sim_name(dev_cfg()->sim_mode),
                      (unsigned)uart_port_get_baud(bus_uart(BUS_PORT_MAIN)),

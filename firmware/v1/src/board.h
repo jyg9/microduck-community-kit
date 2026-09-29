@@ -60,11 +60,18 @@
 #define DBG_ENABLE              1
 #endif
 
-/* Treat USART0 as a second (mirror) bus port so the PC can speak the protocol
-   over /dev/ttyUSB0 while the SPI IMU and the real bus are still missing.
-   0 -> USART0 is a plain 115200 debug console. */
+/* USART0 (PB6/PB7) is the *debug console* and nothing else: it prints DBG_*
+   lines so a problem can be found.  Every bus transaction - the register
+   protocol and the field upgrade - belongs to USART1 (PA2/PA3), the single
+   wire motor bus this node shares with the servos (`docs/upgrade.md` §1,
+   `docs/imu_to_dxl_protocol.md` §2).
+
+   1 -> bench only.  USART0 also answers protocol frames, so a development
+        board with no motor bus wired yet can be driven over /dev/ttyUSB0.
+        A host must then still point the upgrade tool at the bus it means to
+        use: everything the protocol can do, this port can do too. */
 #ifndef BUS_MIRROR_ENABLE
-#define BUS_MIRROR_ENABLE       1
+#define BUS_MIRROR_ENABLE       0
 #endif
 
 /* PB5 status LED, active high.  Only the development board has it. */
