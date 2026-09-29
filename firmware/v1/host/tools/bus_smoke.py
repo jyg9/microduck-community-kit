@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""Hardware smoke test for the imu_to_dxl v1 node over the bench serial link.
+"""Hardware smoke test for the imu_to_dxl v1 node over the motor bus.
 
-Run it against the development board (USART0 mirror on /dev/ttyUSB0) or against
-the final board's motor bus adapter:
+The node shares the single-wire motor bus with the servos, so the port below is
+that bus - never the debug console (USART0), which only prints DBG_* lines and
+answers nothing:
 
     ./build.sh smoke
-    python3 host/tools/bus_smoke.py --port /dev/ttyUSB0 --baud 1000000 --protocol both
+    python3 host/tools/bus_smoke.py --port /dev/ttyACM0 --baud 1000000 --protocol both
     python3 host/tools/bus_smoke.py --self-test        # no hardware needed
+
+(A bench board with no motor bus wired yet can be driven over the console by
+building with -DBUS_MIRROR_ENABLE=1; the upgrade session stays motor-bus only
+even then.)
 
 It checks the two protocol slaves end to end: identity registers, telemetry
 block, both read modes, latency and sample-rate health, quaternion/gyro
@@ -706,7 +711,7 @@ def run_modes(link: bus.Link, name: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--port", default="/dev/ttyUSB0")
+    parser.add_argument("--port", default="/dev/ttyACM0")
     parser.add_argument("--baud", type=int, default=1_000_000)
     parser.add_argument("--id", type=int, default=200, help="node id (both protocols)")
     parser.add_argument("--protocol", choices=["dxl", "fee", "both"], default="both")

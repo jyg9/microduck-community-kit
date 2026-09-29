@@ -22,8 +22,23 @@
 #   EXTRA_CMAKE_ARGS="-DSYS_CLK_SOURCE=IRC8M" ./build.sh
 #   EXTRA_CMAKE_ARGS="-DAPP_VERSION_STR=1.2.3" ./build.sh
 #
-# Serial port / baud for the bench link:
-#   BUS_PORT=/dev/ttyUSB0 BUS_BAUD=1000000 ./build.sh smoke
+# Serial port / baud for the motor bus (this node and the servos share it):
+#   BUS_PORT=/dev/ttyACM0 BUS_BAUD=1000000 ./build.sh smoke    # bench / PCBA
+#   BUS_PORT=/dev/ttyS2   BUS_BAUD=1000000 ./build.sh status   # on the robot
+#
+# The upgrade path (`status`/`boot`/`upgrade`) defaults to BUS_PORT=auto, which
+# probes ttyACM0-1, ttyUSB0-5 and ttyS2 and takes the first device the node
+# answers on, so it works on a bench and on the robot without being told which
+# (docs/upgrade.md §4.5).  The smoke test and the web UI want a concrete device:
+# they use BUS_PORT when it was given, else /dev/ttyACM0.
+#
+# A USB-TTL adapter is a legitimate bus, so ttyUSB* is probed rather than
+# excluded; a *debug console* on USART0 only prints DBG_* lines and answers
+# nothing, so probing it costs one timeout and nothing else (docs/upgrade.md §1).
+# On the robot the bus is the SoC UART /dev/ttyS2 and robotd owns it while it
+# runs: stop it first (`sudo systemctl stop robotd`), then start it again
+# afterwards.  Device numbers follow enumeration, so check `ls /dev/ttyACM*`
+# after plugging anything else in.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -38,7 +53,16 @@ JLINK_IF=SWD
 JLINK_SPEED=4000
 EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS:-}"
 
-BUS_PORT="${BUS_PORT:-/dev/ttyUSB0}"
+# `auto` lets host/upgrade.py pick the motor bus and say which one it took:
+# ttyACM0 -> ttyACM1 -> ttyS2 (docs/upgrade.md §4.5).  The smoke test and the
+# web tool want a concrete device: they take BUS_PORT when it was given
+# explicitly, and ttyACM0 otherwise.
+BUS_PORT="${BUS_PORT:-auto}"
+if [ "${BUS_PORT}" = "auto" ]; then
+    SMOKE_PORT="${SMOKE_PORT:-/dev/ttyACM0}"
+else
+    SMOKE_PORT="${SMOKE_PORT:-${BUS_PORT}}"
+fi
 BUS_BAUD="${BUS_BAUD:-1000000}"
 VENV_PY="${VENV_PY:-}"
 
@@ -66,6 +90,21 @@ configure_build() {
             -DCMAKE_TOOLCHAIN_FILE="${TOOLCHAIN}" \
             -DCMAKE_BUILD_TYPE=Release ${EXTRA_CMAKE_ARGS}
     fi
+
+    # Print the options that change what goes on the wire.  CMake keeps cached
+    # values across a source update, so a build/ directory from before
+    # BUS_MIRROR_ENABLE defaulted to 0 would still be a bench (mirror) build
+    # without saying so.
+    local k
+    for k in APP_SLOT APP_VERSION_STR BOOT_ENABLE DBG_ENABLE BUS_MIRROR_ENABLE IMU_USE_SPI; do
+        printf '  %-18s %s\n' "${k}" \
+            "$(sed -n "s/^${k}:[^=]*=//p" "${BUILD_DIR}/CMakeCache.txt")"
+    done
+    if grep -q '^BUS_MIRROR_ENABLE:[^=]*=1' "${BUILD_DIR}/CMakeCache.txt"; then
+        echo "  NOTE bench build: USART0 also answers protocol frames."
+        echo "       The upgrade session is still refused there (motor bus only)."
+    fi
+
     cmake --build "${BUILD_DIR}" -j"$(nproc)"
 }
 
@@ -191,10 +230,10 @@ case "${action}" in
         echo "Target reset & running."
         ;;
     smoke)
-        py host/tools/bus_smoke.py --port "${BUS_PORT}" --baud "${BUS_BAUD}"
+        py host/tools/bus_smoke.py --port "${SMOKE_PORT}" --baud "${BUS_BAUD}"
         ;;
     host)
-        exec host/tools/py.sh host/server.py --port "${BUS_PORT}" --baud "${BUS_BAUD}"
+        exec host/tools/py.sh host/server.py --port "${SMOKE_PORT}" --baud "${BUS_BAUD}"
         ;;
     test)
         bash host/tools/run_c_tests.sh

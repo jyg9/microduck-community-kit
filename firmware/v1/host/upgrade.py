@@ -22,6 +22,22 @@ Three things this tool is for, in the order a user meets them:
    to the previous slot.  The same code path drives both protocols, so
    `--protocol auto` works on a Dynamixel bus and a FeeTech bus alike.
 
+`--port` is the **motor bus** - the single wire this node shares with the
+servos.  Two environments, same wire:
+  * on a bench / a bare PCBA it is a USB-serial adapter (`/dev/ttyACM*`, or a
+    USB-TTL adapter on `/dev/ttyUSB*`);
+  * on the robot it is the SoC UART robotd itself uses, `/dev/ttyS2`
+    (`[bus] port` in robotd's params).
+With `--port auto` (the default) the tool **probes** every candidate that
+exists - `ttyACM0-1`, `ttyUSB0-5`, `ttyS2` - and takes the first one the node
+actually answers on, so a device is never chosen from its name alone.  A debug
+console that is not also serving the protocol simply never answers.
+
+On the robot, **stop robotd first** - it owns the bus while it runs, and two
+masters on one half-duplex wire corrupt each other.  The tool refuses to open a
+port that somebody else holds (`--allow-busy` overrides) and prints the
+stop/upgrade/start sequence it expects.
+
 Everything is driven with ordinary register reads/writes over `host/bus.py`
 (the same codecs the smoke test and the web tool use); there is no second
 protocol implementation here.
@@ -29,15 +45,17 @@ protocol implementation here.
 Examples:
 
     ./host/upgrade.py verify build/gd32f303cc_imu_to_dxl_slot_b.ipkg
-    ./host/upgrade.py status --port /dev/ttyUSB0
+    ./host/upgrade.py status                             # auto-detects the bus
+    ./host/upgrade.py status --port /dev/ttyACM0         # bench
     ./host/upgrade.py upgrade build/gd32f303cc_imu_to_dxl_slot_b.ipkg \\
-        --port /dev/ttyUSB0 --protocol auto --yes
+        --port /dev/ttyS2 --protocol auto --yes          # on the robot
 """
 
 from __future__ import annotations
 
 import argparse
 import dataclasses
+import glob
 import os
 import struct
 import sys
@@ -114,6 +132,41 @@ VCMD_BOOT = 6
 VCMD_CONFIRM = 5
 VENDOR_ADDR = {PROTO_DXL: 148, PROTO_FEE: 160}
 TELEM_LEN = 20
+
+# ── the motor bus: which device, and is somebody else already on it ────────
+
+# `--port auto` probes these in order and takes the first one that *answers the
+# node*, so it neither guesses from the name nor stops at the first device that
+# merely exists.  Every family here is a real motor bus somewhere: a USB-serial
+# adapter on a bench (`ttyACM*`), a USB-TTL adapter (`ttyUSB0..5`) - which can be
+# either the bus or the debug console, so it is probed rather than excluded - and
+# the SoC UART the robot's runtime opens (`/dev/ttyS2`, `robotd`'s `[bus] port`
+# default on the Radxa Zero 3W).
+PORT_CANDIDATES = (
+    "/dev/ttyACM0",
+    "/dev/ttyACM1",
+    "/dev/ttyUSB0",
+    "/dev/ttyUSB1",
+    "/dev/ttyUSB2",
+    "/dev/ttyUSB3",
+    "/dev/ttyUSB4",
+    "/dev/ttyUSB5",
+    "/dev/ttyS2",
+)
+
+# robotd is the robot's only other bus master.  Two of them on one half-duplex
+# wire corrupt each other's frames, which looks like a flaky node rather than a
+# port conflict, so the tool refuses by default and says what to do.
+ROBOTD_ADVICE = (
+    "robotd owns the motor bus while it runs.  Stop it, upgrade, start it again:\n"
+    "    sudo systemctl stop robotd\n"
+    "    <this command>\n"
+    "    sudo systemctl start robotd\n"
+    "(--allow-busy skips this check if you know the port is free.)"
+)
+
+ROBOTD_SOCKET = "/run/robotd.sock"
+
 
 SLOT_NAMES = {0: "A", 1: "B", 255: "-"}
 PROTOCOLS = {PROTO_DXL: "dynamixel", PROTO_FEE: "feetech"}
@@ -198,28 +251,163 @@ class DeviceInfo:
         return "\n".join(lines)
 
 
-def detect_protocol(port: str, baud: int, imu_id: int, timeout: float,
-                    explicit: str) -> Link:
-    """Open the link and find out which protocol the node answers."""
+def resolve_port(requested: str) -> str:
+    """An explicitly named port, checked for existence."""
+    if not os.path.exists(requested):
+        raise UpgradeError(
+            f"{requested} does not exist.  `--port auto` probes: "
+            + ", ".join(PORT_CANDIDATES)
+        )
+    return requested
+
+
+def _is_pty(dev: str) -> bool:
+    return os.path.realpath(dev).startswith("/dev/pts/")
+
+
+def _pid_name(pid: str) -> str:
+    try:
+        with open(f"/proc/{pid}/comm") as fh:
+            return fh.read().strip()
+    except OSError:
+        return "?"
+
+
+def port_holders(dev: str) -> list[tuple[str, str]]:
+    """Every process with `dev` open, as (pid, name).
+
+    A pty is the one device two processes are *supposed* to hold at once: the
+    simulator in host/tools/boot_node_sim.c keeps the master while a test opens
+    the slave, so ptys report nobody.  Reading /proc needs privileges to see
+    other users' descriptors, which is best effort - the robotd socket below
+    covers the case where they are not readable.
+    """
+    if _is_pty(dev):
+        return []
+    try:
+        want = os.path.realpath(dev)
+    except OSError:
+        return []
+    holders = []
+    for fd in glob.glob("/proc/[0-9]*/fd/*"):
+        try:
+            if os.path.realpath(fd) != want:
+                continue
+        except OSError:
+            continue
+        pid = fd.split("/")[2]
+        holders.append((pid, _pid_name(pid)))
+    return holders
+
+
+def robotd_present() -> bool:
+    """Whether this machine is the robot (its runtime owns the bus when up)."""
+    if os.path.exists(ROBOTD_SOCKET):
+        return True
+    return any(
+        os.path.exists(unit)
+        for unit in (
+            "/lib/systemd/system/robotd.service",
+            "/usr/lib/systemd/system/robotd.service",
+            "/etc/systemd/system/robotd.service",
+        )
+    )
+
+
+def open_node(port: str, baud: int, imu_id: int, timeout: float,
+              explicit: str) -> tuple[Optional[Link], str]:
+    """Try both protocols on one port.
+
+    \returns (link, short_reason): the link once the node answers, else None and
+    a one-line reason ("no answer", "cannot open (...)").  Nothing here is fatal:
+    in `auto` mode an unusable candidate is skipped, and a stale device node that
+    will not open is a normal thing to find in a list to probe.
+    """
     order = [PROTO_DXL, PROTO_FEE]
     if explicit == "dxl":
         order = [PROTO_DXL]
     elif explicit == "fee":
         order = [PROTO_FEE]
 
-    last_error = "no protocol answered"
     for protocol in order:
         link = Link(port, baud=baud, protocol=protocol, imu_id=imu_id,
                     timeout=timeout)
         try:
             link.open()
-        except Exception as exc:  # pyserial errors
-            raise UpgradeError(f"cannot open {port}: {exc}") from exc
+        except Exception as exc:  # pyserial errors: busy, stale node, no rights
+            return None, f"cannot open ({exc})"
         if link.ping():
-            return link
-        last_error = f"{PROTOCOLS[protocol]} did not answer id {imu_id}"
+            return link, ""
         link.close()
-    raise UpgradeError(last_error)
+    return None, f"no answer (tried {', '.join(PROTOCOLS[p] for p in order)})"
+
+
+def open_or_explain(port: str, args: argparse.Namespace) -> Link:
+    """An explicitly named port must work, or the user hears exactly why."""
+    link, reason = open_node(port, args.baud, args.id, args.timeout, args.protocol)
+    if link is not None:
+        return link
+    if reason.startswith("cannot open"):
+        raise UpgradeError(
+            f"{port}: {reason}.  Check the device exists, that you are in the "
+            "dialout group, and that nothing else holds it (--allow-busy)."
+        )
+    raise UpgradeError(
+        f"{port}: {reason}.  Is that the motor bus?  On the robot it is "
+        "/dev/ttyS2; a USB-serial adapter shows up as /dev/ttyACM* or "
+        "/dev/ttyUSB*; a debug console only prints DBG_* lines."
+    )
+
+
+def connect(args: argparse.Namespace) -> Link:
+    """Pick the motor bus, make sure nobody else is on it, and open the link."""
+    if args.port != "auto":
+        port = resolve_port(args.port)
+        holders = port_holders(port)
+        if holders and not args.allow_busy:
+            who = ", ".join(f"{name} (pid {pid})" for pid, name in holders)
+            raise UpgradeError(
+                f"{port} is already open by {who}.  Two masters on one half-duplex "
+                "wire corrupt each other's frames; stop that process first.  On the "
+                f"robot it is robotd:\n{ROBOTD_ADVICE}"
+            )
+        if not holders and not args.allow_busy and os.path.exists(ROBOTD_SOCKET):
+            print(f"warning     : robotd looks like it is running "
+                  f"({ROBOTD_SOCKET} exists); stop it if it uses {port}",
+                  file=sys.stderr)
+        return open_or_explain(port, args)
+
+    # `auto`: probe what exists, skip what somebody else holds, take the first
+    # port the node actually answers on.  The machine's own runtime has to be
+    # dealt with first: while robotd is up there is no port to pick.
+    if os.path.exists(ROBOTD_SOCKET):
+        raise UpgradeError(f"robotd is running, and it owns the motor bus.\n{ROBOTD_ADVICE}")
+
+    tried: list[str] = []
+    busy: list[str] = []
+    for candidate in PORT_CANDIDATES:
+        if not os.path.exists(candidate):
+            continue
+        holders = port_holders(candidate)
+        if holders and not args.allow_busy:
+            busy.append(f"{candidate} ({', '.join(name for _, name in holders)})")
+            continue
+        link, reason = open_node(candidate, args.baud, args.id,
+                                  args.timeout, args.protocol)
+        if link is not None:
+            if not args.quiet:
+                print(f"port        : {candidate} (auto)")
+            return link
+        tried.append(f"{candidate} ({reason})")
+
+    lines = ["no node answered on any motor bus candidate."]
+    lines.append("  tried : " + (", ".join(tried) if tried
+                                   else "(none of the candidates exists)"))
+    if busy:
+        lines.append("  busy  : " + ", ".join(busy) + " - another process holds it")
+        lines.append(ROBOTD_ADVICE)
+    lines.append("Name one explicitly with --port <device>.")
+    raise UpgradeError("\n".join(lines))
 
 
 def read_identity(link: Link) -> DeviceInfo:
@@ -286,7 +474,7 @@ def ask_for_boot(link: Link, timeout_s: float = 5.0) -> DeviceInfo:
             return info
     raise UpgradeError(
         f"the node did not enter the bootloader within {timeout_s:.0f} s "
-        f"(last error: {last})"
+        f"(last error: {last}); it is still answering on {link.port}"
     )
 
 
@@ -611,7 +799,7 @@ def cmd_info(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    link = detect_protocol(args.port, args.baud, args.id, args.timeout, args.protocol)
+    link = connect(args)
     try:
         info = read_identity(link)
         print(info.describe())
@@ -672,7 +860,7 @@ def cmd_upgrade(args: argparse.Namespace) -> int:
           f"{pkg.image_size} bytes, crc {pkg.payload_crc32:#010x}")
 
     # 2. version check against the node
-    link = detect_protocol(args.port, args.baud, args.id, args.timeout, args.protocol)
+    link = connect(args)
     try:
         info = read_identity(link)
         print(f"node        : {PROTOCOLS.get(info.protocol)} id {args.id}, "
@@ -765,6 +953,11 @@ def cmd_upgrade(args: argparse.Namespace) -> int:
             print("note        : the image is on trial; it confirms itself after "
                   "30 s of healthy running, or rolls back after 3 boot attempts")
         print("done")
+        if robotd_present():
+            # On the robot the operator stopped robotd to free the bus.  The
+            # trial image confirms itself as soon as the runtime polls it, so
+            # starting the runtime is both the hand-back and the confirmation.
+            print("next        : hand the bus back: sudo systemctl start robotd")
         return 0
     finally:
         link.close()
@@ -786,7 +979,7 @@ def wait_for_app(link: Link, imu_id: int, timeout_s: float) -> Optional[DeviceIn
 
 
 def cmd_confirm(args: argparse.Namespace) -> int:
-    link = detect_protocol(args.port, args.baud, args.id, args.timeout, args.protocol)
+    link = connect(args)
     try:
         info = read_identity(link)
         if info.mode != "app":
@@ -804,7 +997,7 @@ def cmd_confirm(args: argparse.Namespace) -> int:
 
 def cmd_boot(args: argparse.Namespace) -> int:
     """Put the node into its bootloader and leave it there."""
-    link = detect_protocol(args.port, args.baud, args.id, args.timeout, args.protocol)
+    link = connect(args)
     try:
         info = read_identity(link)
         if info.mode == "boot":
@@ -818,7 +1011,7 @@ def cmd_boot(args: argparse.Namespace) -> int:
 
 
 def cmd_abort(args: argparse.Namespace) -> int:
-    link = detect_protocol(args.port, args.baud, args.id, args.timeout, args.protocol)
+    link = connect(args)
     try:
         info = read_identity(link)
         if info.mode != "boot":
@@ -833,7 +1026,7 @@ def cmd_abort(args: argparse.Namespace) -> int:
 
 
 def cmd_readback(args: argparse.Namespace) -> int:
-    link = detect_protocol(args.port, args.baud, args.id, args.timeout, args.protocol)
+    link = connect(args)
     try:
         info = read_identity(link)
         if info.mode != "boot":
@@ -859,8 +1052,14 @@ def cmd_readback(args: argparse.Namespace) -> int:
 
 
 def add_link_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--port", default="/dev/ttyUSB0",
-                        help="serial device (default /dev/ttyUSB0)")
+    parser.add_argument("--port", default="auto",
+                        help="motor bus serial device, or 'auto' (default) to "
+                             "probe "
+                             + ", ".join(PORT_CANDIDATES)
+                             + " and take the first one the node answers on")
+    parser.add_argument("--allow-busy", action="store_true",
+                        help="do not refuse a port another process holds "
+                             "(robotd owns the bus while it runs)")
     parser.add_argument("--baud", type=int, default=1_000_000,
                         help="bus baud rate (default 1000000)")
     parser.add_argument("--id", type=int, default=200,

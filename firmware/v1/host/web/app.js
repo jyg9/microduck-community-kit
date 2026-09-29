@@ -1,6 +1,6 @@
 'use strict';
 /* =============================================================================
- * microduck soft_imu_to_dxl - IMU bench frontend
+ * microduck imu_to_dxl - IMU bench frontend
  *
  * Plain ES2020, no build step, no external dependencies (fully offline).
  *  - 3D attitude: hand-written WebGL1 renderer with inline GLSL string shaders.

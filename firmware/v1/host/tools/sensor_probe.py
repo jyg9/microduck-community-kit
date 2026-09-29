@@ -26,8 +26,8 @@ vendor window at DXL 148 / FeeTech 160) plus the `imu_restart()` it triggers.
 No servo traffic, no torque, no motion, nothing persistent.
 
 Usage:
-    host/tools/py.sh host/tools/sensor_probe.py --port /dev/ttyACM1
-    ... --port /dev/ttyACM1 --protocol fee --samples 500 --json probe.json
+    host/tools/py.sh host/tools/sensor_probe.py --port /dev/ttyACM0
+    ... --port /dev/ttyACM0 --protocol fee --samples 500 --json probe.json
 """
 
 from __future__ import annotations
@@ -158,7 +158,7 @@ def main() -> int:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    ap.add_argument("--port", default="/dev/ttyACM1")
+    ap.add_argument("--port", default="/dev/ttyACM0")
     ap.add_argument("--baud", type=int, default=1_000_000)
     ap.add_argument("--id", type=int, default=200, help="IMU node id (both protocols)")
     ap.add_argument("--protocol", choices=["dxl", "fee"], default="dxl")

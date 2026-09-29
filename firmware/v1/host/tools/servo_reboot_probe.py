@@ -13,7 +13,7 @@ not persist by design) so the "RAM gains revert to EEPROM on reboot" part of the
 torque, no motion, no EEPROM write, no RESET/CAL.
 
 Usage:
-    host/tools/py.sh host/tools/servo_reboot_probe.py --port /dev/ttyACM1 --id 1
+    host/tools/py.sh host/tools/servo_reboot_probe.py --port /dev/ttyACM0 --id 1
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ def diff(before: dict, after: dict) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--port", default="/dev/ttyACM1")
+    ap.add_argument("--port", default="/dev/ttyACM0")
     ap.add_argument("--baud", type=int, default=1000000)
     ap.add_argument("--id", type=int, default=1)
     args = ap.parse_args()
@@ -146,8 +146,8 @@ def main() -> int:
         print("   now:", link.read_registers(ADDR_KP_RAM, 1)[0],
               link.read_registers(ADDR_KD_RAM, 1)[0])
 
-        print("\n7. our own node's FeeTech personality for 0x08")
-        print("   (compare against soft_imu_to_dxl: fee.c has no 0x08 case -> silent no-op)")
+        print("\n7. this node's own FeeTech personality for 0x08")
+        print("   (src/fee.c has no 0x08 case, so it is a silent no-op there)")
     finally:
         link.close()
     return 0

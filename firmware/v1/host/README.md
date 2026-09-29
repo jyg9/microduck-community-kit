@@ -46,7 +46,7 @@ cd v1
 # 打开上位机（浏览器访问 http://127.0.0.1:8081；页面里再选串口/协议/波特率）
 ./build.sh host
 # 等价于：
-../.venv/bin/python host/server.py --port /dev/ttyUSB0 --baud 1000000 --protocol dxl
+../.venv/bin/python host/server.py --port /dev/ttyACM0 --baud 1000000 --protocol dxl
 
 # 先不上板、只验证工具链
 ../.venv/bin/python host/bus.py                  # 协议向量自检
@@ -55,8 +55,17 @@ host/tools/run_c_tests.sh                        # 固件源码的宿主单元�
 
 # 上板协议冒烟测试（会遍历两种协议与 7 种模拟模式，并还原配置）
 ./build.sh smoke
-BUS_PORT=/dev/ttyUSB1 BUS_BAUD=1000000 ./build.sh smoke
+BUS_PORT=/dev/ttyACM1 BUS_BAUD=1000000 ./build.sh smoke   # 换端口（默认 /dev/ttyACM0）
 ```
+
+`/dev/ttyACM0` 是**电机总线**：本节点和 15 颗舵机挂在同一条单线总线上，上位机、
+冒烟测试、升级工具都走它。ACM 编号跟着适配器枚举走，换 USB 口/插别的设备后先用
+`ls /dev/ttyACM*` 确认；机器人上的总线是 SoC 串口 `/dev/ttyS2`，而升级前要先停 robotd
+（它独占总线，工具会拒绝和别人抢端口，并打印 stop/upgrade/start 提示）。升级工具的
+`--port auto`（默认）会**逐个探测** `ttyACM0-1`、`ttyUSB0-5`、`ttyS2` 里存在的设备，
+取第一个真能应答节点的那个——所以 USB-TTL 上的总线适配器也能被自动找到。
+**调试口（USART0，通常是 CH340 的 `/dev/ttyUSB*`）默认只说 DBG_ 日志**，不解析协议帧，
+探测它只会得到"没有应答"。
 
 服务默认只监听 `127.0.0.1:8081`（`--host 0.0.0.0` 可对外，注意这是无鉴权的调试工具）。
 
@@ -123,7 +132,7 @@ RAM 增益回落到 EEPROM"。输出即 `docs/bus_timing_borrow_plan.md` §1.7 �
 
 | 现象 | 处理 |
 |---|---|
-| 打不开串口 | 确认 `/dev/ttyUSB0` 存在、当前用户有权限（`dialout` 组）、没有别的程序占用；受限沙箱里 `/dev` 可能不可见，需要在宿主机执行 |
+| 打不开串口 | 确认**电机总线**口存在（通常 `/dev/ttyACM0`，换 USB 口后先 `ls /dev/ttyACM*` 确认编号）、当前用户有权限（`dialout` 组）、没有别的程序占用；`/dev/ttyUSB*` 是 CH340 调试口，**不是总线**，连节点不能用它；受限沙箱里 `/dev` 可能不可见，需要在宿主机执行 |
 | 一直 timeout | 端口选错 / 波特率不对（默认 1 Mbps）/ 协议选错（节点会自动识别，但主机得先发对一种）；用 `DBG_LEVEL=3` 看节点是否收到字节 |
 | 有大量坏帧 | 检查是否与调试文本混流（文本行以 `#` 开头，帧解析会跳过）、线缆质量、1 Mbps 下 USB-TTL 是否支持 |
 | 数据不动 | 节点可能处于 `SIM_MODE=6 frozen`（这是故意用来测 stale 的）或 `5 sflp-wait`；改成 `sine` 看 |

@@ -5,7 +5,7 @@ Serves a single-page instrument (web/) on http://127.0.0.1:8081 and talks to the
 board over the bench serial link:
 
     ./build.sh host
-    python3 host/server.py --port /dev/ttyUSB0 --baud 1000000 --protocol dxl
+    python3 host/server.py --port /dev/ttyACM0 --baud 1000000 --protocol dxl
 
 The browser gets a WebSocket at /ws and receives decoded samples at the poll
 rate, a statistics block twice a second, and status/config updates whenever they
@@ -286,7 +286,7 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
             try:
                 if op == "connect":
                     await loop.run_in_executor(None, lambda: SESSION.connect(
-                        data.get("port") or SESSION.port or "/dev/ttyUSB0",
+                        data.get("port") or SESSION.port or "/dev/ttyACM0",
                         int(data.get("baud", 1_000_000)),
                         data.get("protocol", PROTO_DXL),
                         data.get("mode", "sync_read"),

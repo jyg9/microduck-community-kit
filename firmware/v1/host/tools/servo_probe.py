@@ -17,8 +17,8 @@ whether it is answered. No WRITE / REG_WRITE / ACTION / RESET / CAL / torque /
 motion traffic of any kind.
 
 Usage:
-    host/tools/py.sh host/tools/servo_probe.py --port /dev/ttyACM1
-    ... --port /dev/ttyACM1 --baud 1000000 --id 1 --repeat 15 --json out.json
+    host/tools/py.sh host/tools/servo_probe.py --port /dev/ttyACM0
+    ... --port /dev/ttyACM0 --baud 1000000 --id 1 --repeat 15 --json out.json
 """
 
 from __future__ import annotations
@@ -267,7 +267,7 @@ def summarize(name: str, samples: List[dict], key: str) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--port", default="/dev/ttyACM1")
+    ap.add_argument("--port", default="/dev/ttyACM0")
     ap.add_argument("--baud", type=int, default=1000000)
     ap.add_argument("--id", type=int, default=1)
     ap.add_argument("--repeat", type=int, default=15)

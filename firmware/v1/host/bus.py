@@ -8,7 +8,7 @@ This module is the single source of truth on the host side for:
   * the 20-byte IMU block layout and the mounting rotation microduck applies,
   * a serial `Link` that polls the node and decodes samples.
 
-Everything here mirrors `soft_imu_to_dxl/v1/src/*.c`; the constants and the
+Everything here mirrors `src/*.c`; the constants and the
 packet vectors are asserted against the C implementation by
 `tools/bus_smoke.py --self-test` and `tools/test_protocols.c`.
 
