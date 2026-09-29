@@ -3,7 +3,7 @@
 > 这不是官方Microduck仓库，<a href="https://github.com/pollen-robotics/microduck">官方仓库</a>在这里，感谢他们开源。本项目是复刻所需硬件PCB补充。
 
 主要包括：
-- **imu_to_dxl**：<a href="hardware/imu_to_dxl">身体传感器板</a>、<a href="firmware/v1">对应的固件</a>和<a href="firmware/v1/host">上位机测试软件</a>。特点：高度接近原版设计、高可靠设计、固件可在线升级。其中，飞特1910舵机官方代码<a href="firmware/v1/patches">参考补丁</a>在这里
+- **imu_to_dxl**：<a href="hardware/imu_to_dxl">身体传感器板</a>、<a href="firmware/v1">对应的固件</a>和<a href="firmware/v1/host">上位机测试软件</a>。特点：高度接近原版设计、高可靠设计、固件可在线升级。
 - **banana_pcb**：<a href="hardware/banana_pcb">电池上方的转接小板</a>
 - **dxl_hub**：<a href="hardware/dxl_hub">鸭鸭身体中的集线器板</a>
 - **飞特舵机调试软件**：<a href="software/hls_servo_debugger">飞特舵机调试软件</a>
