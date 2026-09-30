@@ -166,6 +166,23 @@
           <div id="provCalibrateDesc" class="hint"></div>
 
           <div class="form-grid">
+            <label>位置环 Kp（21/50 号，0~254）
+              <input id="provKp" type="number" value="32" min="0" max="254">
+            </label>
+            <label>位置环 Kd（22/51 号，0~254）
+              <input id="provKd" type="number" value="0" min="0" max="254">
+            </label>
+          </div>
+          <div class="hint warn" id="provGainNote">
+            实测本机：<b>Kp = 200 会让关节自激振荡</b>——目标不动时电流 5 A、壳温升到
+            74 °C 并持续上升、人耳听到剧烈抖动；改成厂商默认的 <b>32</b> 后峰值电流
+            110 mA、温度不升。200 是 <code>robotd</code> 那份给 XL330（0..16383 标度）
+            调的 <code>gain</code>，在飞特 0..254 上是顶格。这里同时写 EEPROM 21/22
+            （掉电保存）与 RAM 50/51（立即生效）。<b>注意</b>：robotd 启动后会按
+            <code>robotd.toml</code> 的 <code>gain</code> 覆盖 RAM 50，两边要一致。
+          </div>
+
+          <div class="form-grid">
             <label>转中位速度（0.732 RPM/计数）
               <input id="provSpeed" type="number" value="60" min="-32767" max="32767">
             </label>

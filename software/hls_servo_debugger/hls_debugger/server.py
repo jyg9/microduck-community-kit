@@ -651,6 +651,14 @@ def api_joints():
         "imu_bus_id": IMU_BUS_ID,
         "expected_baud_code": EXPECTED_BAUD_CODE,
         "baud_names": BAUD_CODE_NAMES,
+        "gain_kp_default": provision.POSITION_KP_DEFAULT,
+        "gain_kd_default": provision.POSITION_KD_DEFAULT,
+        "gain_max": provision.POSITION_GAIN_MAX,
+        "gain_note": "位置环增益：初始化写 EEPROM 21/22 + RAM 50/51，"
+                     "Kp 默认 %d（厂商默认）。实测 Kp=200 会让关节自激振荡"
+                     "（5 A、74 °C），那是 robotd 给 XL330 标度调的 gain；"
+                     "robotd 启动后会按 robotd.toml 的 gain 覆盖 RAM 50，两边要一致。"
+                     % provision.POSITION_KP_DEFAULT,
         "position_wrap": provision.POSITION_WRAP,
         "position_tolerance": provision.POSITION_TOLERANCE,
         "position_note": "实测本机：位置(56) ≡ 编码器值 − 位置偏移(31) (mod 4096)；"
@@ -694,6 +702,11 @@ def api_provision():
     calibrate = str(data.get("calibrate") or "cal")
     mode = str(data.get("mode") or "fresh")
     write_response_level = bool(data.get("write_response_level", True))
+    write_gain = bool(data.get("write_gain", True))
+    gain_kp = payload_int(data, "gain_kp", provision.POSITION_KP_DEFAULT,
+                          0, provision.POSITION_GAIN_MAX)
+    gain_kd = payload_int(data, "gain_kd", provision.POSITION_KD_DEFAULT,
+                          0, provision.POSITION_GAIN_MAX)
     multiturn = bool(data.get("multiturn", True))
     speed = payload_int(data, "speed", 60, -32767, 32767)
     acc = payload_int(data, "acc", 30, 0, 254)
@@ -702,6 +715,9 @@ def api_provision():
         target_id,
         calibrate=calibrate,
         write_response_level=write_response_level,
+        write_gain=write_gain,
+        gain_kp=gain_kp,
+        gain_kd=gain_kd,
         multiturn=multiturn,
         mode=mode,
         speed=speed,

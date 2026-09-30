@@ -127,6 +127,9 @@ class FakeServoSerial(object):
                 "max_limit": 4095,
                 "regs": {0: 3, 1: 46, 2: 0, 3: 10, 4: 31, 5: sid,
                          6: 0, 7: 253, 8: 1, 33: 4, 40: 0, 41: 0,
+                         # 出厂 EPROM 位置环 P/D = 32/40，上电加载进 RAM 50/51
+                         # （真机回读确认，见 provision.POSITION_KP_DEFAULT）。
+                         21: 32, 22: 40, 50: 32, 51: 40,
                          48: 1000, 55: 1, 65: 0, 66: 0},
             }
         self.data = bytearray()
@@ -435,6 +438,61 @@ def test_offset_calibration_restores_the_offset_instead_of_faking_it():
     assert bus._serial.servos[22]["offset"] == 0, "失败时必须把偏移恢复原值"
 
 
+def test_gain_default_is_the_vendors_value_not_robots_200():
+    """初始化写的 Kp 必须是厂商默认量级，不能是 robotd 那个给 XL330 调的 200。
+
+    真机实测（2026-09-30，15 台装在悬空鸭子上）：RAM 50 = 200 时 left_hip_yaw
+    自激振荡——峰值电流 4966 mA、壳温 74 °C 且持续上升；改成 32 后峰值 110 mA、
+    温度不升。这条测试就是防止有人把默认值改回去。
+    """
+    assert provision.POSITION_KP_DEFAULT == 32
+    assert provision.POSITION_KP_DEFAULT < 200
+    assert 0 <= provision.POSITION_KP_DEFAULT <= provision.POSITION_GAIN_MAX
+    assert provision.POSITION_KD_DEFAULT == 0, "Kd 与 set_gain 的写法对齐（写 0）"
+
+
+def test_provision_writes_a_safe_position_gain():
+    bus = fake_bus([1])
+    result = provision.Provisioner(bus).provision(20, calibrate="none")
+    assert result["ok"], result["error"] + str(result["steps"])
+    regs = bus._serial.servos[20]["regs"]
+    assert regs[21] == provision.POSITION_KP_DEFAULT, "EEPROM 21（位置环 P）"
+    assert regs[22] == provision.POSITION_KD_DEFAULT, "EEPROM 22（位置环 D）"
+    assert regs[50] == provision.POSITION_KP_DEFAULT, "RAM 50 立即生效"
+    assert regs[51] == provision.POSITION_KD_DEFAULT
+    assert regs[21] != 200
+    assert regs[55] == 1, "写完必须重新上锁"
+    assert result["gain"] == {"kp": 32, "kd": 0}
+    names = [item["name"] for item in result["steps"]]
+    assert "写位置环增益" in names
+    assert all(item["ok"] for item in result["steps"] if item["name"].startswith("写位置环"))
+
+
+def test_provision_gain_is_configurable_and_clamped():
+    bus = fake_bus([1])
+    result = provision.Provisioner(bus).provision(20, calibrate="none", gain_kp=64, gain_kd=8)
+    assert result["ok"], result["error"] + str(result["steps"])
+    regs = bus._serial.servos[20]["regs"]
+    assert (regs[21], regs[22], regs[50], regs[51]) == (64, 8, 64, 8)
+
+    # 超出 0..254 的值按寄存器范围夹住，而不是回绕成一个很小的数。
+    bus = fake_bus([1])
+    result = provision.Provisioner(bus).provision(20, calibrate="none", gain_kp=9999, gain_kd=-5)
+    assert result["ok"], result["error"] + str(result["steps"])
+    regs = bus._serial.servos[20]["regs"]
+    assert regs[21] == provision.POSITION_GAIN_MAX == 254
+    assert regs[22] == 0
+
+
+def test_provision_can_leave_the_gain_alone():
+    bus = fake_bus([1])
+    result = provision.Provisioner(bus).provision(20, calibrate="none", write_gain=False)
+    assert result["ok"], result["error"] + str(result["steps"])
+    regs = bus._serial.servos[20]["regs"]
+    assert (regs[21], regs[22], regs[50], regs[51]) == (32, 40, 32, 40), "跳过时保持原值"
+    assert "写位置环增益" in [item["name"] for item in result["steps"]]
+
+
 def test_census_reports_who_is_on_the_bus():
     bus = fake_bus([10, 24])
     data = provision.Provisioner(bus).census()
@@ -456,6 +514,10 @@ def main():
     test_provision_fresh_servo_gets_its_joint_id()
     test_provision_enables_multiturn_so_negative_angles_work()
     test_provision_can_keep_the_factory_single_turn_limit()
+    test_gain_default_is_the_vendors_value_not_robots_200()
+    test_provision_writes_a_safe_position_gain()
+    test_provision_gain_is_configurable_and_clamped()
+    test_provision_can_leave_the_gain_alone()
     test_provision_cal_calibration_lands_on_the_2048_midpoint()
     test_provision_offset_calibration_hits_the_home_pose()
     test_offset_calibration_wraps_a_negative_home_angle_without_multiturn()

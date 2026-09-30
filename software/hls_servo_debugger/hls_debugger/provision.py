@@ -72,6 +72,10 @@ from .protocol import (
     ADDR_MAX_ANGLE_LIMIT,
     ADDR_MIN_ANGLE_LIMIT,
     ADDR_MODE,
+    ADDR_POSITION_KD_EPROM,
+    ADDR_POSITION_KD_RAM,
+    ADDR_POSITION_KP_EPROM,
+    ADDR_POSITION_KP_RAM,
     ADDR_POSITION_OFFSET,
     ADDR_PRESENT_MOVING,
     ADDR_PRESENT_POSITION,
@@ -110,6 +114,30 @@ def _wrap_delta(got, want, wrap=POSITION_WRAP):
 #: 锁标志的两个取值，按厂商内存表的字面措辞命名，避免"打开/关闭"歧义。
 LOCK_EPROM_SAVED = 0  # 写 0：关闭写入锁，EPROM 写入掉电保存
 LOCK_EPROM_VOLATILE = 1  # 写 1：打开写入锁，EPROM 写入掉电不保存
+
+# ── 位置环增益：批量初始化写入的默认值 ──────────────────────────────────────
+# 为什么要写：舵机出厂 EPROM 的位置环 P 是厂商默认的 32，但 **microduck 的
+# `robotd` 会在启动时按 `robotd.toml` 的 `gain` 把 RAM 50 覆盖成它自己的值**
+# （`duck-control/src/bus.rs` 的 `set_gain`），而 `deploy/robotd.toml` 那份默认
+# 是给 XL330 的 0..16383 标度调的 200 —— 在 FeeTech 的 0..254 上就是顶格。
+#
+# 真机实测（2026-09-30，HD-1910-C001 / 固件 3.46，15 台装在一只悬空的鸭子上）：
+#   写 RAM 50 = 200：left_hip_yaw（ID 20）自激振荡，峰值电流 4966–5388 mA，
+#     目标不动时自报速度 4.37 rad/s，壳温升到 74 °C 且持续上升，人耳听到剧烈抖动；
+#   写 RAM 50 = 32 ：同一关节峰值电流 110 mA、平均 20 mA、速度峰值 0.307 rad/s、
+#     通电 6 s 温度不变（48→49 °C），其余 14 台电流同样近 0。
+# Kd 取 0 是与 `set_gain` 对齐：厂商出厂 EPROM 的 D 是 40，而 microduck 刻意把
+# Kd 写 0（不让舵机自己的阻尼叠在策略输出上）。初始化写 0 可以让"robotd 还没启动"
+# 的那段时间里舵机行为与 robotd 接管后一致。
+#
+# 两个值都写两处：EEPROM 21/22（掉电保存，上电时加载进 RAM）与 RAM 50/51
+# （立即生效，不必等下一次上电）。**注意**：robotd 一旦启动仍会用
+# `robotd.toml` 的 `gain` 覆盖 RAM 50，所以这两个值只保证"出厂/未接管时是对的"，
+# 整机增益仍需与 `robotd.toml` 保持一致（补丁说明未决事项 2/3）。
+POSITION_KP_DEFAULT = 32
+POSITION_KD_DEFAULT = 0
+#: 位置环增益寄存器的合法范围（厂商内存表：0 ~ 254）。
+POSITION_GAIN_MAX = 254
 
 #: 出厂新舵机的两个特征。
 FRESH_ID = FACTORY_ID
@@ -289,6 +317,35 @@ class Provisioner(object):
         if not acked:
             detail = note + "；" + detail
         return log.add(name, ok, detail)
+
+    def _write_gain(self, servo_id, log, kp=POSITION_KP_DEFAULT,
+                    kd=POSITION_KD_DEFAULT):
+        """写位置环增益：EEPROM 21/22（掉电保存）+ RAM 50/51（立即生效）。
+
+        只解锁一次、写完两个地址再上锁：两次 `_write_eeprom` 会在中间多做一次
+        解锁/上锁，而这里两个地址是同一件事。之后 RAM 与 EEPROM 各回读一次校验。
+        """
+        kp = max(0, min(POSITION_GAIN_MAX, int(kp)))
+        kd = max(0, min(POSITION_GAIN_MAX, int(kd)))
+        self._write(servo_id, ADDR_LOCK, bytes([LOCK_EPROM_SAVED]))
+        acked, note = self._write(
+            servo_id, ADDR_POSITION_KP_EPROM, bytes([kp]))
+        acked2, note2 = self._write(
+            servo_id, ADDR_POSITION_KD_EPROM, bytes([kd]))
+        time.sleep(EEPROM_SETTLE)
+        self._write(servo_id, ADDR_LOCK, bytes([LOCK_EPROM_VOLATILE]))
+
+        self._write_check(log, "写位置环 P（21 号 EPROM → 50 号 Kp）",
+                          servo_id, ADDR_POSITION_KP_RAM, bytes([kp]), kp)
+        self._write_check(log, "写位置环 D（22 号 EPROM → 51 号 Kd）",
+                          servo_id, ADDR_POSITION_KD_RAM, bytes([kd]), kd)
+
+        detail = "Kp=%d Kd=%d" % (kp, kd)
+        if not (acked and acked2):
+            detail += "（EPROM 写入未收到应答：%s / %s）" % (note, note2)
+        detail += ("；robotd 启动后会按 robotd.toml 的 gain 覆盖 RAM 50，"
+                   "两边保持一致才有意义")
+        return log.add("写位置环增益", True, detail)
 
     def _write_eeprom(self, servo_id, addr, data):
         """按厂商 unLockEprom/LockEprom 的方式写一个 EPROM 寄存器。
@@ -637,12 +694,18 @@ class Provisioner(object):
 
     # -- 主流程 ──────────────────────────────────────────────────────────
     def provision(self, target_id, calibrate="cal", write_response_level=True,
-                  multiturn=True, mode="fresh", speed=60, acc=30, timeout=None):
+                  multiturn=True, mode="fresh", speed=60, acc=30, timeout=None,
+                  gain_kp=POSITION_KP_DEFAULT, gain_kd=POSITION_KD_DEFAULT,
+                  write_gain=True):
         """把一颗舵机初始化成 target_id 对应的关节。
 
         mode：
           * ``"fresh"`` —— 源是出厂 ID 1 的新舵机（默认）；
           * ``"reinit"`` —— 源就是目标 ID 本身，用于重新编号 / 重新校准。
+
+        gain_kp / gain_kd：写进位置环 RAM 50/51 与 EEPROM 21/22 的增益，
+        默认是厂商默认的 32 / 0。**不要用 robotd 那份给 XL330 调过的 200**
+        （实测 200 会让关节自激振荡、5 A、74 °C，见本模块顶部的常数说明）。
 
         multiturn：把 9/11 号角度限制写成 0，打开多圈绝对位置控制。
         **microduck 需要它**：15 个关节里有 4 个的 home 姿态角是负的，
@@ -759,7 +822,14 @@ class Provisioner(object):
         else:
             log.add("多圈位置控制", True, "按设置跳过（保持出厂一圈行程）")
 
-        # 7. 初始位置校准
+        # 7. 位置环增益：EEPROM 21/22 + RAM 50/51
+        result["gain"] = {"kp": int(gain_kp), "kd": int(gain_kd)}
+        if write_gain:
+            self._write_gain(target_id, log, kp=gain_kp, kd=gain_kd)
+        else:
+            log.add("写位置环增益", True, "按设置跳过（保持舵机原值）")
+
+        # 8. 初始位置校准
         if calibrate == "cal":
             self._write(target_id, ADDR_LOCK, bytes([LOCK_EPROM_SAVED]))
             ok, _step, before, after = self._calibrate_cal(target_id, log)
@@ -793,7 +863,7 @@ class Provisioner(object):
         else:
             log.add("初始位置校准", True, "按设置跳过（只改 ID）")
 
-        # 8. 打开写入锁（写 1），保护 EPROM 不再被误写。
+        # 9. 打开写入锁（写 1），保护 EPROM 不再被误写。
         self._write(target_id, ADDR_LOCK, bytes([LOCK_EPROM_VOLATILE]))
         try:
             lock = self._read_byte(target_id, ADDR_LOCK)
