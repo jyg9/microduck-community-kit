@@ -18,10 +18,8 @@
 > 相关文档
 > * `docs/dynamixel_slave.md` —— Dynamixel 从站实现细节与寄存器表（含 2.0 字节填充）
 > * `docs/flash_layout.md` —— Flash 分区 / bootloader / 总线升级协议设计（待实现）
-> * `docs/roadmap_lsm6ds3trc.md` —— 降本换 LSM6DS3TR-C + 单片机姿态融合方案
 > * `docs/lsm6dsv16x_driver_spec.md` —— 真 LSM6DSV16X 驱动规格（含 §8.1 CONVERGE 实现状态）
 > * `docs/bus_timing_borrow_plan.md` —— 总线时序风险分析 + 借鉴计划（**已实施**；真机缺陷见 §4.6，真机验证见 §7）
-> * `docs/real_robot_runbook.md` —— 真机运行手册（15 舵机 + ONNX 速度策略）
 > * `patches/microduck_feetech_patch.md` —— 官方 `microduck` 仓库飞特补丁说明（补丁文件同目录）
 > * `../../software/microduck_feetech/` —— 打好该补丁的官方 `microduck` 完整源码（可直接编译运行 `robotd`）
 > * `../../docs/飞特通讯协议说明.md` —— 飞特协议完整说明
@@ -68,7 +66,7 @@
 
 **仍未在真硬件上验证的部分**：绝对 T_resp（要示波器/逻辑分析仪，宿主 USB 时间戳只到 ~0.3 ms）；
 本节点排在 `sync_read` ID 列表中间/末尾时的让位（运行时 200 固定第 0 位）；
-满槽 96 KB 升级与擦除中途掉电演练；主机侧 `robotd` 突发截断（见 `docs/real_robot_runbook.md` §7）。
+满槽 96 KB 升级与擦除中途掉电演练；主机侧 `robotd` 突发截断（见 `docs/bus_timing_borrow_plan.md §7.7`）。
 
 ---
 
@@ -456,7 +454,7 @@ upgrade → VCMD_BOOT 进 bootloader → 分块写（块 CRC + 序号 + 回读�
 **开放项（主机侧，不是固件/接线）**：`robotd` 跑策略时约 17.5 s 的使能窗口里报 97 次
 （进程共 98 条）`sync_read: id(s) ... missing`，缺失集合总是回复到达顺序的尾部；直连同一总线的
 16 ID/150 次全完整，所以残余截断在 `duck-control/src/bus.rs` 的突发处理
-（`sync_read_blocks()` + `BURST_IDLE`/`pump()`）。详见 `docs/real_robot_runbook.md` §7。
+（`sync_read_blocks()` + `BURST_IDLE`/`pump()`）。详见 `docs/bus_timing_borrow_plan.md §7.7`。
 
 ## 9. 目录结构
 

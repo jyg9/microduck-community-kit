@@ -439,9 +439,11 @@ Dynamixel 载荷里恰好的 `FF FF <本机 ID>` 被误判成 FeeTech 帧，同�
 **推算**为 240 µs（指令）+ 210 µs（本节点 15 字节应答）+ 15 × 295 µs ≈ **4.9 ms**
 （【估算】`docs/bus_timing_borrow_plan.md §2`）。4.9 ms 不是测量值。
 
-主机侧还需要知道：**USB 适配器可能整块丢一次回复**（不是设备掉线）。真机实测到"缺失集合
-总是回复到达顺序的尾部，形状像一个 USB 传输块被整块丢掉"（【实测】`docs/real_robot_runbook.md`
-的阻塞项 **B13** 与 §B13 追加实测）。主机应**容忍/有限重试缺失的回复**，而不是判定节点故障。
+主机侧还需要知道：**USB 适配器可能整块丢一次回复**（不是设备掉线）。2026-09-25 在真机 15 舵机
+总线上实测到"缺失集合总是回复到达顺序的尾部，形状像一个 USB 传输块被整块丢掉"
+（【实测】95 次里 60 次只收到 `200`，其余是按到达顺序连续的一段舵机 ID；同一条总线上直连的
+16 ID 读 150/150 完整，数字见 `docs/bus_timing_borrow_plan.md §7.7`）。主机应**容忍/有限重试
+缺失的回复**，而不是判定节点故障。
 
 ---
 
@@ -1458,8 +1460,8 @@ Fee 数据帧：FF FF C8 13 03 F0 68 20 00 20 85 CB 00 08 CD CB 00 08 CD CB 00 0
    症状：`sync_read` 的应答集合总是"尾部缺一段"（实测 95 次里 60 次只有 `200`，其余是
    按到达顺序连续的一段舵机 ID），形状像"一个 USB 传输块被整块丢掉"；直连总线的同样
    16 ID 读取 150/150 完整。修复：主机容忍/有限重试缺失的回复；`robotd` 的"沿用上一份好
-   样本 + consecutive_errors"就是安全兜底。（【实测】`docs/real_robot_runbook.md` 阻塞项
-   **B13** 与 §B13 追加实测；`docs/bus_timing_borrow_plan.md §4.6` 记录了同类主机侧截断。）
+   样本 + consecutive_errors"就是安全兜底。（【实测】2026-09-25 真机 15 舵机联调，
+   `docs/bus_timing_borrow_plan.md §7.7` 与 §4.6 记录的是同一次测量与同类主机侧截断。）
 
 9. **`0x8A` 的应答不是"每台一个状态帧"，而是一个聚合帧。**
    症状：主机按普通状态帧逐帧解析，只看到第 0 台的 8 字节前缀与第一段，剩下的段被当成噪声；
@@ -1654,7 +1656,7 @@ CLI 的 pty 端到端，173 断言）、`host/tools/test_crc16.c` / `test_crc32.
 
 1. **本节点自身的绝对 T_resp**（"指令帧最后一个停止位 → 本节点第一个应答位"）。
    仓库明确写着需要示波器/逻辑分析仪，宿主 USB 时间戳分辨率不够，**从未测过**
-   （`docs/bus_timing_borrow_plan.md §6` 第 2 项、§8；`docs/real_robot_runbook.md §8` 第 7 项）。
+   （`docs/bus_timing_borrow_plan.md §6` 第 2 项、§8）。
    文档只给出目标：典型 ≤ 100 µs、硬上限 < 250 µs（同文档 §附录 A）。
 2. **Dynamixel 伺服（XL330 等）的 `sync_read` 槽长是否也是 ≈295 µs**。槽长是在
    **FeeTech HD-1910（fw 3.46）**上实测的（`docs/bus_timing_borrow_plan.md §1.3`）；
@@ -1703,7 +1705,7 @@ CLI 的 pty 端到端，173 断言）、`host/tools/test_crc16.c` / `test_crc32.
 | 11 | 加速度的坐标系一致性 | —（文档未提） | — | 真驱动在 `REPORT_FRAME=1` 时**不旋转加速度**（`src/imu_spi.c:553-594`），模拟器**会旋转**（`src/imu_sim.c:196-205`） |
 | 12 | `bus.py` 的厂商窗偏移 19 | 参考实现里叫 `"reserved"`（`host/bus.py:82`） | 源码里是 `V_LAST_ERR`（`src/board.h:496-500`） | `host/bus.py` 的 `VOFF` 当时未同步，也缺 `VCMD_CONFIRM/BOOT/SWITCH_SLOT`。**已修正**：现在偏移 19 就叫 `last_err`，三个命令码也补齐了（`host/bus.py:82-97`） |
 | 13 | `docs/dynamixel_slave.md` 的 STATUS_RETURN_LEVEL | "0 = 只有 PING；1 = PING + READ/SYNC_READ；2 = 全部"（`docs/dynamixel_slave.md:86-87`） | — | level 0/1 仍会应答 REG_WRITE/ACTION/FACTORY_RESET/REBOOT；level 0 的 WRITE/CLEAR 静默（`src/dxl2.c`，§5.1 的精确表） |
-| 14 | 悬空引用 | `src/fee.h:17` 指向 `docs/fee_tech_protocol.md` | — | 该文件在仓库中**不存在**。**已修正**：改指 `docs/imu_to_dxl_protocol.md` §7 与 `docs/飞特通讯协议说明.md` |
+| 14 | 悬空引用 | `src/fee.h:17` 指向 `docs/fee_tech_protocol.md` | — | 该文件在仓库中**不存在**。**已修正**：改指本文档 §7 与厂商手册 `飞特通讯协议说明.md`（仓库根 `docs/`） |
 | 15 | 固件版本 vs 镜像版本 | 寄存器报 1.0（`src/board.h:49-50`） | 当前构建镜像头报 1.2.0（`build/CMakeCache.txt:21`、`build/gd32f303cc_imu_to_dxl_slot_a.json`） | 两个独立版本来源（§13.1），不是笔误 |
 
 ---

@@ -5,9 +5,9 @@ INT2=PB1）接到现有 100 Hz 主循环上，产出与 `src/imu.h` 一致的 20
 
   本文档每个寄存器号/位域/常数都给出 `§节号 / Table 号`。凡数据手册文本无法确认的，
   一律标注 **【不确定/需查原图】**，不猜。
-* 交叉参考（**不作为数字依据**）：`docs/roadmap_lsm6ds3trc.md`（主机契约、
-  `TELEM_FLAG_*` 语义）、`src/imu.h` / `src/imu_sim.c` / `src/imu_math.h`
-  （20 字节块与 half 编码的既有约定）、`src/board.h`（引脚与标志位）。
+* 交叉参考（**不作为数字依据**）：`src/imu.h` / `src/imu_sim.c` / `src/imu_math.h`
+  （20 字节块与 half 编码的既有约定）、`src/board.h`（引脚与标志位）；
+  `TELEM_FLAG_*` 的语义见 `docs/imu_to_dxl_protocol.md` §6.4。
 * 目标 20 字节块（`src/imu.h`、`board.h TELEM_LEN=20`）：
 
 | 字节 | 内容 |
@@ -523,7 +523,7 @@ PB0/PB1 在 `main.c` 里已是上拉输入，可直接接。
   多这一笔 SPI 完全无压力（2 字节 @7.5 MHz ≈ 2.4 µs）；
 * 结论：**INT1 只作为可选的"低延迟唤醒/掉帧告警"**。若实现：
   `PB0` 配 EXTI0 下降沿/上升沿（按 `H_LACTIVE`），ISR 里只 `s_fifo_irq = 1;`，
-  **不在 ISR 里做 SPI**（与 `roadmap_lsm6ds3trc.md` §3.5 的既有约定一致），
+  **不在 ISR 里做 SPI**（既有约定：ISR 只置标志、主循环消费），
   主循环消费该标志；EXTI 优先级必须低于 USART1 的总线中断。
 
 **方案 B（可选升级，仅当 ±8.3 ms 时间戳抖动不可接受）**：

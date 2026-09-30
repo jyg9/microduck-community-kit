@@ -518,7 +518,7 @@ FF FF FD 00 (4) | ID (1) | LEN_L LEN_H (2) | INST (1) | ADDR_L ADDR_H (2) | DATA
 | FeeTech | 帧为 `FF FF ID LEN INST ADDR` + 16 B DATA + `~SUM` = 23 字节，应答 ~7 字节，量级相同 |
 
 以上是估算而非实测。真实数字必须由 §7.5 第 8 项的台面计时给出，并据此设置
-`upgrade_bus.py` 的超时。若以后要缩短，可临时把总线降到 500 kbps
+`host/upgrade.py` 的超时。若以后要缩短，可临时把总线降到 500 kbps
 （`dev_dxl_baud()` / `dev_fee_baud()` 都支持）以换取更宽松的时序余量。
 
 ### 5.7 不打扰总线上其他舵机
@@ -645,15 +645,15 @@ host 侧判定"节点处于 boot 模式"的规则：`ping()` 返回 true 且 mod
 | `v1/linker/gd32f303cc_app.ld` | 保持 | 开发板构型（`APP_SLOT=0`），不加 header |
 | `v1/CMakeLists.txt` | 修改 | 新增 option `BOOT_ENABLE`（0/1，默认 0）、`BOOT_APP_SLOT`（bootloader 默认启动哪个 slot）、把 `boot_*.c` 加进目标；新增可执行目标 `gd32f303cc_imu_to_dxl_boot`（用 `gd32f303cc_boot.ld`）；`APP_SLOT=1|2` 时自动启用 header 后处理 |
 | `v1/CMakeLists.txt` 的 POST_BUILD | 修改 | 应用构建后调用 `v1/host/tools/mkapp_header.py`（下）把 header 打进 `.hex`/`.bin` 并回填 CRC |
-| `v1/host/tools/mkapp_header.py` | 新增 | 见 7.2 |
-| `v1/host/tools/upgrade_bus.py` | 新增 | 见 7.3 |
+| `v1/host/tools/mkapp_header.py` | 新增 | 见 7.2；**实现名 `host/package.py`**（`pack` 子命令） |
+| `v1/host/tools/upgrade_bus.py` | 新增 | 见 7.3；**实现名 `host/upgrade.py`** |
 | `v1/host/tools/test_protocols.c` | 修改 | 新增 §7.4 的用例；**不要**改动现有 689 行里的既有用例 |
 | `v1/host/tools/test_crc32.c` | 新增 | CRC32 对拍（`zlib.crc32` 生成向量，C 实现验证） |
 | `v1/host/tools/run_c_tests.sh` | 修改 | 编译并运行新增测试 |
 | `v1/src/board.h` | 修改 | 新增 §5.2 的 `UPGRADE_*`/`U_*`/`UPG_CMD_*`/`UPG_ST_*`/`BOOT_MODEL_NUMBER`；应用侧新增 `VCMD_BOOT`（触发软复位进 boot） |
 | `v1/src/dev.c` | 修改 | `VCMD_BOOT` 的实现（置 `boot_stay`、写 `BOOT_RAM_MAGIC`、`dev_request_reboot()`）；`cfg_blob_t` 升到 `CFG_VERSION=2` 并加 boot 字段；`UPG_CONFIRM` 在应用态可直接清 trial |
 
-### 7.2 `mkapp_header.py` 流程
+### 7.2 `mkapp_header.py`（实现为 `host/package.py`）流程
 
 ```
 输入：build/gd32f303cc_imu_to_dxl.bin（APP_SLOT=1|2 构建产物，从 slot base 起）
@@ -673,7 +673,7 @@ host 侧判定"节点处于 boot 模式"的规则：`ping()` 返回 true 且 mod
 **顺序要求**：先算 CRC，再写 header，再把 `.hex` 交出去；`UPG_END` 里节点复算的
 `imgcrc` 必须与 json 里的值一致（CI 里断言）。
 
-### 7.3 `upgrade_bus.py` 流程
+### 7.3 `upgrade_bus.py`（实现为 `host/upgrade.py`）流程
 
 ```
 参数：--port /dev/ttyACM0 --baud 1000000 --protocol dxl|fee --id 200

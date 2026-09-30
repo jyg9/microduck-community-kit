@@ -19,8 +19,9 @@
 **实测依据**（本仓库 + 真硬件）：
 
 * `host/tools/servo_probe.py`（只读探针：PING / READ / SYNC_READ，绝不写）
-* `飞特通讯协议/hls_servo_debugger/`（HLS 浏览器调试台 + `hw_test.py`，依据厂商 `HLSCL.cpp` / `SCS.cpp`）
-* `飞特通讯协议/飞特通讯协议说明.md`、`HLS系列舵机内存表.html`（厂商资料）
+* `software/hls_servo_debugger/`（HLS 浏览器调试台 + `hw_test.py`，依据厂商 `HLSCL.cpp` / `SCS.cpp`）
+* 厂商手册 `飞特通讯协议说明.md`（仓库根 `docs/`）与 `HLS系列舵机内存表.html`（随硬件资料提供，
+  未随仓库发布）
 * 我方固件：`src/bus_arb.c` / `src/telem_pack.c` / `src/us_time.c` / `src/uart_port.c` /
   `src/bus.c` / `src/dev.c` / `src/fee.c` / `src/dxl2.c`
 
@@ -164,7 +165,7 @@
 ### 1.7 `0x08` REBOOT 实测（2026-09-24，用户确认舵机空载可重启）
 
 对方《飞特适配架构》§3.4 说"飞特新固件有 REBOOT（0x08，约 800 ms，先关扭矩）"，
-而我们自己的 `飞特通讯协议说明.md` 的指令表里**没有 0x08**（依据的是更旧的手册）。
+而仓库根 `docs/飞特通讯协议说明.md`（厂商手册）的指令表里**没有 0x08**（依据的是更旧的手册）。
 用户允许重启（舵机输出轴没接任何负载），工具 `host/tools/servo_reboot_probe.py` 的实测：
 
 | 项 | 实测 | 说明 |
@@ -583,8 +584,8 @@ missing`（`/tmp/robotd7.log`；整个进程 98 条），缺失集合总是**回
 （`200`，然后 `23,24,30,31,32,33`，再 `24,30,31,32,33,34`）——是一段突发提前结束，不是设备掉线。
 总线本身已被上面的直连测量证明干净，所以残余截断出在主机侧突发处理
 （`duck-control/src/bus.rs` 的 `sync_read_blocks()` + `BURST_IDLE`/`pump()`，
-补丁行 `patches/microduck-feetech.patch:243,576,662`），是下一轮要修的开放项，见
-`docs/real_robot_runbook.md` §7。
+补丁行 `patches/microduck-feetech.patch:243,576,662`），是下一轮要修的开放项；本节与
+`docs/imu_to_dxl_protocol.md` §12 第 8 项记录的是同一次测量。
 
 ---
 
@@ -687,7 +688,7 @@ BUS_PORT=/dev/ttyACM1 ./build.sh smoke         # 传感器感知的协议冒烟�
 ```
 
 沙箱里 `/dev` 被 tmpfs 覆盖（只剩 14 个基础节点），必须用**非沙箱/full access** 运行；
-`飞特通讯协议/hls_servo_debugger/README.md` 有同样说明，其 `hw_test.py` 是另一份独立的只读
+`software/hls_servo_debugger/README.md` 有同样说明，其 `hw_test.py` 是另一份独立的只读
 连通性测试（结论一致：ID 1、fw 3.46、mode 4、锁 1、56..70 反馈）。
 
 ## 附录 C · 改动的文件（P0/P1）
@@ -730,7 +731,7 @@ BUS_PORT=/dev/ttyACM1 ./build.sh smoke         # 传感器感知的协议冒烟�
   `src/board.h` / `CMakeLists.txt`（`IMU_USE_SPI`）；
 * 主机：新增 `host/tools/sensor_probe.py`（只读表征探针）；`host/tools/bus_smoke.py` 改成
   传感器感知（真/模拟两条路径）；`host/tools/test_protocols.c` 增加 FIFO tag 回归；
-* 文档：本文件（§4.6、§7.6、§7.7）、`README.md`、`docs/real_robot_runbook.md`、
+* 文档：本文件（§4.6、§7.6、§7.7）、`README.md`、
   `docs/lsm6dsv16x_driver_spec.md`（§8.1 实现状态）。
 
 ### 补丁追平上游（2026-09-29）
