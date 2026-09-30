@@ -14,6 +14,18 @@
     lastFeedback: null,
     chart: { pos: [], speed: [], current: [] },
     lastPollToast: 0,
+    prov: {
+      joints: [],
+      calibrateModes: [],
+      factoryId: 1,
+      imuBusId: 200,
+      positionWrap: 4096,
+      positionNote: "",
+      index: 0,
+      status: {},      // 关节 ID -> "done" | "fail"
+      precheck: null,
+      busy: false,
+    },
   };
 
   // ------------------------------------------------------------------
@@ -822,6 +834,382 @@
   }
 
   // ------------------------------------------------------------------
+  // 整机 15 台舵机初始化向导
+  // ------------------------------------------------------------------
+  async function loadJoints() {
+    const data = await safe(api("/api/joints"));
+    if (!data) return;
+    S.prov.joints = data.joints || [];
+    S.prov.calibrateModes = data.calibrate_modes || [];
+    S.prov.factoryId = data.factory_id !== undefined ? data.factory_id : 1;
+    S.prov.imuBusId = data.imu_bus_id !== undefined ? data.imu_bus_id : 200;
+    S.prov.positionWrap = data.position_wrap || 4096;
+    S.prov.positionNote = data.position_note || "";
+
+    const select = $("provCalibrate");
+    select.innerHTML = "";
+    S.prov.calibrateModes.forEach((mode) => {
+      const opt = document.createElement("option");
+      opt.value = mode.id;
+      opt.textContent = mode.name;
+      select.appendChild(opt);
+    });
+    const preferred = S.prov.calibrateModes.filter((m) => m.id === "cal")[0];
+    select.value = preferred ? "cal" : (S.prov.calibrateModes[0] || {}).id;
+    renderProvProgress();
+    renderProvStep();
+    updateProvCalibrate();
+  }
+
+  function provSelected() {
+    return S.prov.joints[S.prov.index] || null;
+  }
+
+  function provMode() {
+    const el = $("provMode");
+    return el ? el.value : "fresh";
+  }
+
+  function provCalibrateMeta() {
+    const id = $("provCalibrate").value;
+    return S.prov.calibrateModes.filter((m) => m.id === id)[0] || null;
+  }
+
+  function renderProvProgress() {
+    const wrap = $("provProgress");
+    if (!wrap) return;
+    wrap.innerHTML = "";
+    if (!S.prov.joints.length) {
+      wrap.textContent = "关节表尚未加载。";
+      return;
+    }
+    S.prov.joints.forEach((joint, index) => {
+      const status = S.prov.status[joint.id] || "";
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "prov-item" + (index === S.prov.index ? " active" : "") +
+        (status === "done" ? " done" : "") + (status === "fail" ? " fail" : "");
+      const mark = status === "done" ? "✔" : (status === "fail" ? "✘" : String(index + 1));
+      item.innerHTML = "<span class=\"prov-mark\">" + mark + "</span>" +
+        "<span class=\"prov-name\">" + joint.name + "</span>" +
+        "<span class=\"prov-badge\">ID " + joint.id + "</span>";
+      item.title = joint.group + " · home " + joint.home_deg + "° (" + joint.home_counts + " 计数)";
+      item.addEventListener("click", () => {
+        if (S.prov.busy) return;
+        S.prov.index = index;
+        S.prov.precheck = null;
+        renderProvProgress();
+        renderProvStep();
+        updateProvButtons();
+        showResult("provResult", "已切换到 " + joint.name + "（ID " + joint.id + "）。点击“检测总线”开始。");
+      });
+      wrap.appendChild(item);
+    });
+  }
+
+  function renderProvStep() {
+    const box = $("provStep");
+    const joint = provSelected();
+    if (!box) return;
+    if (!joint) {
+      box.textContent = "关节表尚未加载。";
+      return;
+    }
+    const done = Object.keys(S.prov.status).filter((k) => S.prov.status[k] === "done").length;
+    const fresh = provMode() === "fresh";
+    const source = fresh ? S.prov.factoryId : joint.id;
+    const wrapped = ((joint.home_counts % S.prov.positionWrap) + S.prov.positionWrap) % S.prov.positionWrap;
+    const lines = [];
+    lines.push("<b>" + (S.prov.index + 1) + "/" + S.prov.joints.length + " · " + joint.name +
+      "</b>（" + joint.group + "，目标 ID <b>" + joint.id + "</b>，home 姿态 " +
+      joint.home_deg + "° = " + joint.home_counts + " 计数" +
+      (wrapped !== joint.home_counts ? "，读数上回绕为 " + wrapped + " 计数" : "") + "）");
+    if (fresh) {
+      lines.push("<ol>" +
+        "<li>总线上只接这<b>一个</b>新舵机，其余可以留着；确认它已上电。</li>" +
+        "<li>点 <b>检测总线</b>：应看到 ID " + source + " 在线、ID " + joint.id + " 未占用。</li>" +
+        "<li>选好校准方式，点 <b>开始初始化</b>：关闭写入锁 → 写 ID/波特率 → 校准 → 打开写入锁 → 回读校验。</li>" +
+        "<li>完成后<b>断电拔下这颗舵机</b>，装上下一个新舵机（出厂 ID " + source + "），点 <b>下一个关节</b>。</li>" +
+        "</ol>");
+    } else {
+      lines.push("<ol>" +
+        "<li>确认 ID <b>" + joint.id + "</b> 的这颗舵机已经接在总线上（重新编号 / 重新校准）。</li>" +
+        "<li>点 <b>检测总线</b>，再点 <b>开始初始化</b>。</li>" +
+        "</ol>");
+    }
+    lines.push("<div class=\"prov-sub\">已完成 " + done + " / " + S.prov.joints.length + " 台。</div>");
+    box.innerHTML = lines.join("");
+  }
+
+  function updateProvCalibrate() {
+    const meta = provCalibrateMeta();
+    const box = $("provCalibrateDesc");
+    if (!box) return;
+    if (!meta) {
+      box.textContent = "";
+      return;
+    }
+    box.className = meta.needs_reference ? "hint warn" : "hint";
+    const extra = (meta.id === "cal" || meta.id === "offset") && S.prov.positionNote
+      ? " " + S.prov.positionNote
+      : "";
+    box.textContent = meta.desc + extra + (meta.needs_reference
+      ? " 执行前请把该关节摆到基准位，并在下面勾选确认；校准只改坐标原点，不校验机械姿态。"
+      : "");
+    updateProvButtons();
+  }
+
+  function updateProvButtons() {
+    const busy = !!S.prov.busy;
+    const joint = provSelected();
+    const check = S.prov.precheck;
+    const meta = provCalibrateMeta();
+    const referenceOk = !meta || !meta.needs_reference || $("provReference").checked;
+
+    let ready = !!joint && !!check && check.source_present;
+    if (ready && provMode() === "fresh" && check.target_present) ready = false;
+    if (ready && provMode() === "reinit" && !check.target_present) ready = false;
+    if (ready && check.source_snapshot && check.source_snapshot.status !== 0) ready = false;
+    ready = ready && referenceOk;
+
+    $("btnProvCheck").disabled = busy;
+    $("btnProvRun").disabled = busy || !ready;
+    $("btnProvNext").disabled = busy;
+    $("btnProvCensus").disabled = busy;
+    $("btnProvTorqueOff").disabled = busy;
+    $("provMode").disabled = busy;
+    $("provCalibrate").disabled = busy;
+    $("btnProvRun").title = ready ? "" :
+      "需要先“检测总线”，并满足该模式的前置条件（CAL / 位置偏移校准还需勾选基准位确认）。";
+  }
+
+  function setProvBusy(busy) {
+    S.prov.busy = !!busy;
+    updateProvButtons();
+  }
+
+  async function provisionCheck() {
+    const joint = provSelected();
+    if (!joint) return;
+    if (!$("provResult")) return;
+    setProvBusy(true);
+    showResult("provResult", "正在检测总线（逐个 PING 15 个关节，约 1~3 秒）…");
+    const data = await safe(api("/api/provision/precheck", "POST", {
+      id: joint.id,
+      mode: provMode(),
+    }));
+    setProvBusy(false);
+    if (!data) return;
+    S.prov.precheck = data;
+    updateProvButtons();
+    const lines = [];
+    lines.push("目标关节：" + data.target.name + "（ID " + data.target.id + "）");
+    lines.push("出厂 ID " + data.source_id + "：" + (data.source_present ? "在线 ✔" : "无应答 ✘"));
+    lines.push("目标 ID " + data.target_id + "：" + (data.target_present ? "已占用" : "未占用 ✔"));
+    if (data.source_snapshot) {
+      const s = data.source_snapshot;
+      lines.push("  读到的 ID " + s.id_read + " · 固件 " + s.firmware + " · 波特率编码 " +
+        s.baud_code + " · 模式 " + s.mode + " · 锁 " + s.lock + " · 电压 " + s.voltage +
+        " V · 温度 " + s.temperature + " °C · 状态 " + s.status);
+    }
+    lines.push("在线的关节 ID：" + (data.present_joints.length ? data.present_joints.join(", ") : "（无）"));
+    if (data.imu_present) lines.push("IMU 节点（ID " + data.imu_bus_id + "）也在总线上。");
+    (data.warnings || []).forEach((text) => lines.push("⚠ " + text));
+    if (data.source_snapshot && data.source_snapshot.status !== 0) {
+      lines.push("⚠ 该舵机状态字节非 0，先处理硬件异常（电压/编码/温度/电流）再初始化。");
+    }
+    showResult("provResult", lines.join("\n"));
+  }
+
+  async function provisionRun() {
+    const joint = provSelected();
+    if (!joint) return;
+    const meta = provCalibrateMeta();
+    const mode = provMode();
+    let confirmText = "将把" + (mode === "fresh"
+      ? "出厂 ID " + S.prov.factoryId + " 的新舵机" : "ID " + joint.id + " 的舵机") +
+      "初始化为「" + joint.name + "」（ID " + joint.id + "）。\n" +
+      "校准方式：" + (meta ? meta.name : "无") + "\n";
+    if (meta && meta.id === "mid") confirmText += "舵机会转到位置 0 并保持扭矩。\n";
+    if (meta && meta.id === "cal") confirmText += "舵机会执行 CAL，当前位置将成为中点。\n";
+    if (meta && meta.id === "offset") {
+      confirmText += "将把 31 号位置偏移改成本关节的 home 姿态（" + joint.home_deg + "°）。\n";
+    }
+    if ($("provMultiturn").checked && joint.home_counts < 0) {
+      confirmText += "本关节 home 角是负的（" + joint.home_counts +
+        " 计数），需要多圈位置控制；这一步会把 9/11 号角度限制写成 0。\n";
+    }
+    confirmText += "会写 EPROM，请确认可以随时断电。继续？";
+    if (!window.confirm(confirmText)) return;
+
+    setProvBusy(true);
+    showResult("provResult", "正在初始化 " + joint.name + "（ID " + joint.id + "）…");
+    const data = await safe(api("/api/provision", "POST", {
+      id: joint.id,
+      mode,
+      calibrate: $("provCalibrate").value,
+      write_response_level: $("provResponseLevel").checked,
+      multiturn: $("provMultiturn").checked,
+      speed: Number($("provSpeed").value) || 0,
+      acc: Number($("provAcc").value) || 0,
+      timeout_ms: getTimeoutMs(100),
+    }));
+    setProvBusy(false);
+    if (!data) {
+      S.prov.status[joint.id] = "fail";
+      renderProvProgress();
+      return;
+    }
+    renderProvResult(data);
+    S.prov.status[joint.id] = data.ok ? "done" : "fail";
+    renderProvProgress();
+    renderProvSnapshot(data.snapshot);
+    if (data.ok) {
+      toast(joint.name + "（ID " + joint.id + "）初始化完成", "ok");
+      const snap = data.snapshot || {};
+      if (snap.torque) {
+        toast("注意：这颗舵机扭矩仍开着，装好舵盘后请点“关闭扭矩（卸力）”", "error");
+      }
+    } else {
+      toast("初始化未完成：" + (data.error || "见结果"), "error");
+    }
+  }
+
+  function renderProvResult(data) {
+    const lines = [];
+    lines.push((data.ok ? "✔ 初始化成功" : "✘ 初始化未完成") +
+      (data.error ? "：" + data.error : ""));
+    lines.push("目标：" + data.target.name + "（ID " + data.target.id + "），校准方式：" + data.calibrate);
+    lines.push("");
+    (data.steps || []).forEach((step) => {
+      lines.push((step.ok ? "[ OK ] " : "[FAIL] ") + step.name + "：" + step.detail);
+    });
+    if (data.calibration && data.calibration.mode === "cal") {
+      lines.push("");
+      lines.push("CAL 实测：校准前位置 " + data.calibration.before +
+        " 计数 → 校准后 " + data.calibration.after +
+        " 计数（本机 CAL 的目标是单圈中点 2048 计数 = 180°）。");
+    }
+    if (data.calibration && data.calibration.mode === "offset") {
+      const c = data.calibration;
+      lines.push("");
+      lines.push("位置偏移校准：读数 " + c.position_before + " → " + c.position_after +
+        " 计数；目标 " + c.target_counts + " 计数 = " + c.target_deg + "°" +
+        (c.target_wrapped !== undefined && c.target_wrapped !== c.target_counts
+          ? "（读数按一圈回绕为 " + c.target_wrapped + "）" : "") + "。");
+    }
+    if (data.calibration && data.calibration.mode === "mid") {
+      lines.push("");
+      lines.push("转中位实测：读数 " + data.calibration.position + " 计数；扭矩保持开启，装好舵盘后请点“关闭扭矩（卸力）”。");
+    }
+    lines.push("");
+    if (data.ok) {
+      lines.push("下一步：断电，拔下这颗舵机，接上下一个新舵机（出厂 ID " + S.prov.factoryId +
+        "），然后点“下一个关节”。");
+    }
+    showResult("provResult", lines.join("\n"));
+  }
+
+  function provMetric(label, value, sub) {
+    return "<div class=\"metric\"><div class=\"metric-label\">" + label +
+      "</div><div class=\"metric-value\">" + value +
+      "</div><div class=\"metric-sub\">" + (sub || "") + "</div></div>";
+  }
+
+  function renderProvSnapshot(snap) {
+    const box = $("provSnapshot");
+    if (!box) return;
+    if (!snap) {
+      box.innerHTML = provMetric("等待初始化", "--", "完成后显示回读结果");
+      return;
+    }
+    box.innerHTML = [
+      provMetric("ID", snap.id_read, "期望 " + snap.id),
+      provMetric("位置", snap.position + " 计数", snap.position_deg + "° · 0.087°/计数"),
+      provMetric("位置偏移", snap.position_offset, "31 号寄存器"),
+      provMetric("波特率", snap.baud_code, (S.prov.baudNames && S.prov.baudNames[snap.baud_code]) || ""),
+      provMetric("锁标志", snap.lock, snap.lock === 1 ? "EPROM 掉电不保存" : "EPROM 掉电保存"),
+      provMetric("扭矩", snap.torque, "40 号寄存器"),
+      provMetric("模式", snap.mode, (S.modeNames && S.modeNames[snap.mode]) || ""),
+      provMetric("多圈位置控制", snap.multiturn ? "已打开" : "未打开",
+        "9/11 号 = " + snap.min_angle_limit + "/" + snap.max_angle_limit +
+        (snap.multiturn ? " · 负关节角可用" : " · 负目标会被夹到 0")),
+      provMetric("电压", snap.voltage + " V", "温度 " + snap.temperature + " °C"),
+      provMetric("舵机状态", snap.status, snap.status === 0 ? "正常" : "异常（位屏蔽 0~3）"),
+      provMetric("固件", snap.firmware, "舵机 " + snap.servo_version),
+    ].join("");
+  }
+
+  async function provisionCensus() {
+    if (S.prov.busy) return;
+    setProvBusy(true);
+    showResult("provResult", "正在点检 15 个关节（逐个 PING，约 1~3 秒）…");
+    const data = await safe(api("/api/provision/census", "POST", {}));
+    setProvBusy(false);
+    if (!data) return;
+    showResult("provResult", "点检完成：" + data.present_count + " / " + data.total + " 台在线。");
+    const box = $("provCensus");
+    if (!box) return;
+    const rows = ["<table><thead><tr><th>关节</th><th>ID</th><th>在线</th><th>位置</th><th>电压</th><th>温度</th><th>状态</th><th>备注</th></tr></thead><tbody>"];
+    (data.items || []).forEach((row) => {
+      const s = row.snapshot || {};
+      rows.push("<tr><td>" + row.name + "<div class=\"prov-sub\">" + row.group + "</div></td>" +
+        "<td class=\"mono\">" + row.id + "</td>" +
+        "<td>" + (row.present ? "✔" : "—") + "</td>" +
+        "<td class=\"mono\">" + (s.position !== undefined ? s.position + " (" + s.position_deg + "°)" : "—") + "</td>" +
+        "<td class=\"mono\">" + (s.voltage !== undefined ? s.voltage + " V" : "—") + "</td>" +
+        "<td class=\"mono\">" + (s.temperature !== undefined ? s.temperature + " °C" : "—") + "</td>" +
+        "<td class=\"mono\">" + (s.status !== undefined ? s.status : "—") + "</td>" +
+        "<td>" + (row.error || "") + "</td></tr>");
+    });
+    rows.push("</tbody></table>");
+    box.innerHTML = rows.join("");
+  }
+
+  async function provisionTorqueOff() {
+    const joint = provSelected();
+    if (!joint) return;
+    setProvBusy(true);
+    const data = await safe(api("/api/torque", "POST", { id: joint.id, enable: 0 }), "已发送关闭扭矩");
+    setProvBusy(false);
+    if (data) showResult("provResult", "已对 ID " + joint.id + " 写 40 号 = 0（关闭扭矩）。");
+  }
+
+  function provisionNext() {
+    const joint = provSelected();
+    if (!joint) return;
+    S.prov.status[joint.id] = S.prov.status[joint.id] || "";
+    const next = S.prov.index + 1;
+    if (next >= S.prov.joints.length) {
+      const missing = S.prov.joints.filter((item) => S.prov.status[item.id] !== "done");
+      showResult("provResult", "已经是最后一个关节。未完成的关节：" +
+        (missing.length ? missing.map((item) => item.name + "(ID " + item.id + ")").join("、") : "（无，15 台全部完成 🎉）"));
+      return;
+    }
+    S.prov.index = next;
+    S.prov.precheck = null;
+    renderProvProgress();
+    renderProvStep();
+    updateProvButtons();
+    const now = provSelected();
+    showResult("provResult", "请断电，换上 " + now.name + "（ID " + now.id +
+      "）的新舵机（出厂 ID " + S.prov.factoryId + "），然后点“检测总线”。");
+  }
+
+  function provisionReset() {
+    if (!window.confirm("清空本页的进度标记（不会改动舵机）？")) return;
+    S.prov.status = {};
+    S.prov.index = 0;
+    S.prov.precheck = null;
+    renderProvProgress();
+    renderProvStep();
+    updateProvButtons();
+    renderProvSnapshot(null);
+    $("provCensus").innerHTML = "";
+    showResult("provResult", "进度已重置。");
+  }
+
+  // ------------------------------------------------------------------
   // 日志
   // ------------------------------------------------------------------
   async function refreshLogs() {
@@ -939,6 +1327,20 @@
 
     $("btnLogRefresh").addEventListener("click", refreshLogs);
     $("btnLogClear").addEventListener("click", async () => { await safe(api("/api/logs/clear", "POST")); refreshLogs(); });
+
+    $("btnProvCheck").addEventListener("click", provisionCheck);
+    $("btnProvRun").addEventListener("click", provisionRun);
+    $("btnProvNext").addEventListener("click", provisionNext);
+    $("btnProvCensus").addEventListener("click", provisionCensus);
+    $("btnProvTorqueOff").addEventListener("click", provisionTorqueOff);
+    $("btnProvReset").addEventListener("click", provisionReset);
+    $("provCalibrate").addEventListener("change", updateProvCalibrate);
+    $("provReference").addEventListener("change", updateProvButtons);
+    $("provMode").addEventListener("change", () => {
+      S.prov.precheck = null;
+      renderProvStep();
+      updateProvButtons();
+    });
   }
 
   async function init() {
@@ -960,6 +1362,7 @@
       renderParamGroups();
       renderMemoryTable();
     }
+    await loadJoints();
     await refreshStatus();
     await refreshLogs();
     window.setInterval(refreshLogs, 1500);

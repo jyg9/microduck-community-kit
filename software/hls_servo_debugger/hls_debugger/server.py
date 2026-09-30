@@ -19,10 +19,14 @@ import webbrowser
 from flask import Flask, jsonify, request, send_from_directory
 
 from . import memory_table
+from . import provision
 from .memory_table import BAUD_CODES, BAUD_CODE_NAMES, MODE_NAMES
 from .protocol import (
     BROADCAST_ID,
+    EXPECTED_BAUD_CODE,
+    FACTORY_ID,
     HLSBus,
+    IMU_BUS_ID,
     ProtocolError,
     parse_frame,
 )
@@ -40,6 +44,7 @@ DEFAULT_BAUD = 1000000
 
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="/static")
 bus = HLSBus()
+provisioner = provision.Provisioner(bus)
 
 
 # ----------------------------------------------------------------------
@@ -630,6 +635,87 @@ def api_raw():
         "rx_bytes": list(rx),
         "first_frame": parsed,
     })
+
+
+# ----------------------------------------------------------------------
+# 整机 15 台舵机的初始化（编号 + 位置校准）
+# ----------------------------------------------------------------------
+@app.route("/api/joints", methods=["GET"])
+def api_joints():
+    """microduck 的 15 个关节表，以及初始化相关的常量。"""
+    return ok({
+        "joints": provision.get_joints(),
+        "groups": provision.JOINT_GROUPS,
+        "calibrate_modes": provision.calibrate_modes(),
+        "factory_id": FACTORY_ID,
+        "imu_bus_id": IMU_BUS_ID,
+        "expected_baud_code": EXPECTED_BAUD_CODE,
+        "baud_names": BAUD_CODE_NAMES,
+        "position_wrap": provision.POSITION_WRAP,
+        "position_tolerance": provision.POSITION_TOLERANCE,
+        "position_note": "实测本机：位置(56) ≡ 编码器值 − 位置偏移(31) (mod 4096)；"
+                         "负值有时回绕成 0~4095、有时带 BIT15 报负值，"
+                         "所以校准按一圈取模比较并留 %d 计数容差。"
+                         % provision.POSITION_TOLERANCE,
+        "multiturn_note": "实测本机：出厂 11 号最大角度限制 = 4095 会把行程锁在一圈内，"
+                          "写负目标位置舵机不动；把 9/11 号都写成 0（多圈绝对位置控制）"
+                          "之后负目标才会执行。microduck 有 4 个负角关节，因此初始化默认打开。",
+        "total": len(provision.JOINTS),
+    })
+
+
+@app.route("/api/provision/precheck", methods=["POST"])
+@handle_protocol
+def api_provision_precheck():
+    """初始化前的上电检查：该在的在不在、不该在的别在。"""
+    data = payload()
+    if data.get("id") in (None, ""):
+        raise ValueError("缺少 id（要初始化的关节 ID）")
+    target_id = payload_int(data, "id", None, 0, 253)
+    mode = str(data.get("mode") or "fresh")
+    source_id = FACTORY_ID if mode != "reinit" else target_id
+    if data.get("source_id") not in (None, ""):
+        source_id = payload_int(data, "source_id", source_id, 0, 253)
+    return ok(provisioner.precheck(target_id, source_id))
+
+
+@app.route("/api/provision", methods=["POST"])
+@handle_protocol
+def api_provision():
+    """把一颗舵机初始化成指定关节 ID，并按选择完成初始位置校准。
+
+    这会写 EPROM（ID/波特率/应答级别/位置偏移）并可能让舵机转动，
+    调用前必须由用户确认机械安全。
+    """
+    data = payload()
+    if data.get("id") in (None, ""):
+        raise ValueError("缺少 id（要初始化的关节 ID）")
+    target_id = payload_int(data, "id", None, 0, 253)
+    calibrate = str(data.get("calibrate") or "cal")
+    mode = str(data.get("mode") or "fresh")
+    write_response_level = bool(data.get("write_response_level", True))
+    multiturn = bool(data.get("multiturn", True))
+    speed = payload_int(data, "speed", 60, -32767, 32767)
+    acc = payload_int(data, "acc", 30, 0, 254)
+    timeout_ms = float(data.get("timeout_ms", 100))
+    result = provisioner.provision(
+        target_id,
+        calibrate=calibrate,
+        write_response_level=write_response_level,
+        multiturn=multiturn,
+        mode=mode,
+        speed=speed,
+        acc=acc,
+        timeout=max(0.01, timeout_ms / 1000.0),
+    )
+    return ok(result)
+
+
+@app.route("/api/provision/census", methods=["POST"])
+@handle_protocol
+def api_provision_census():
+    """点检：逐个 PING 15 个关节，返回在线的和它们的状态。"""
+    return ok(provisioner.census())
 
 
 @app.route("/api/memory_map", methods=["GET"])

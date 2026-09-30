@@ -30,15 +30,16 @@
 <div class="app-shell">
   <aside class="sidebar">
     <button class="nav-item active" data-tab="connection"><span>01</span>连接与扫描</button>
-    <button class="nav-item" data-tab="feedback"><span>02</span>实时反馈</button>
-    <button class="nav-item" data-tab="position"><span>03</span>位置控制</button>
-    <button class="nav-item" data-tab="speed"><span>04</span>速度 / 电流 / PWM</button>
-    <button class="nav-item" data-tab="params"><span>05</span>参数配置</button>
-    <button class="nav-item" data-tab="sync"><span>06</span>同步读写</button>
-    <button class="nav-item" data-tab="advanced"><span>07</span>寄存器 / 原始指令</button>
-    <button class="nav-item" data-tab="memory"><span>08</span>内存表参考</button>
+    <button class="nav-item" data-tab="provision"><span>02</span>舵机初始化</button>
+    <button class="nav-item" data-tab="feedback"><span>03</span>实时反馈</button>
+    <button class="nav-item" data-tab="position"><span>04</span>位置控制</button>
+    <button class="nav-item" data-tab="speed"><span>05</span>速度 / 电流 / PWM</button>
+    <button class="nav-item" data-tab="params"><span>06</span>参数配置</button>
+    <button class="nav-item" data-tab="sync"><span>07</span>同步读写</button>
+    <button class="nav-item" data-tab="advanced"><span>08</span>寄存器 / 原始指令</button>
+    <button class="nav-item" data-tab="memory"><span>09</span>内存表参考</button>
     <div class="sidebar-foot">
-      <div>协议来源：<code>飞特通讯协议</code></div>
+      <div>协议来源：<code>docs/飞特通讯协议说明.md</code></div>
       <div>参考实现：<code>HLSCL.cpp / SCS.cpp</code></div>
     </div>
   </aside>
@@ -110,6 +111,7 @@
         <ol class="steps">
           <li>确认舵机供电，串口设备为 <code>/dev/ttyACM1</code>，默认波特率先选 <b>1 Mbps</b>。</li>
           <li>点击 <b>连接</b>，再点击 <b>Ping</b>；如果失败，依次尝试 115200、500000、250000、57600、38400。</li>
+          <li>整机 15 台舵机按关节 ID 编号：打开 <b>舵机初始化</b> 页签，按提示逐个接入新舵机。</li>
           <li>到 <b>实时反馈</b> 读取当前位置、速度、电压、温度等状态。</li>
           <li>到 <b>位置控制</b> 先打开扭矩，再写目标位置。</li>
         </ol>
@@ -119,7 +121,98 @@
       </div>
     </section>
 
-    <!-- 02 实时反馈 -->
+    <!-- 02 舵机初始化 -->
+    <section id="tab-provision" class="tab-panel">
+      <div class="card">
+        <div class="card-head">
+          <h2>整机 15 台舵机初始化（编号 + 初始位置校准）</h2>
+          <div class="button-row compact">
+            <button id="btnProvCensus" class="btn">点检 15 台</button>
+            <button id="btnProvReset" class="btn btn-small">重置进度</button>
+          </div>
+        </div>
+        <div class="hint">
+          关节表、关节 ID 与 home 姿态角取自机器人软件
+          <code>microduck_feetech/duck-control/src/model.rs</code> 与
+          <code>duck-ipc-proto</code> 的 <code>JOINT_NAMES</code>。
+          新舵机出厂是 <b>ID 1 / 1 Mbps</b>，本向导把它改写成对应的关节 ID，
+          再按选择的工艺做初始位置校准，最后回读校验并上锁。
+        </div>
+        <div class="hint warn">
+          <b>一次只接一个新舵机。</b>两颗出厂 ID 都是 1 的舵机同时在线时会被一起改名，
+          产生重复 ID（重复 ID 会让整条总线的读写互相打架，且很难查）。
+          初始化会写 EPROM（ID / 波特率 / 应答级别 / 位置偏移）并可能让舵机转动，
+          请先确认机械安全、可以随时断电。
+        </div>
+        <div id="provProgress" class="prov-progress"></div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h2>当前关节</h2>
+          <div id="provStep" class="prov-step">正在加载关节表…</div>
+
+          <div class="form-grid">
+            <label>模式
+              <select id="provMode">
+                <option value="fresh">新舵机（出厂 ID 1 → 关节 ID）</option>
+                <option value="reinit">重新初始化（目标 ID 已经在线上）</option>
+              </select>
+            </label>
+            <label>初始位置校准
+              <select id="provCalibrate"></select>
+            </label>
+          </div>
+          <div id="provCalibrateDesc" class="hint"></div>
+
+          <div class="form-grid">
+            <label>转中位速度（0.732 RPM/计数）
+              <input id="provSpeed" type="number" value="60" min="-32767" max="32767">
+            </label>
+            <label>加速度（8.7 °/s²/计数）
+              <input id="provAcc" type="number" value="30" min="0" max="254">
+            </label>
+          </div>
+
+          <label class="check-row">
+            <input id="provMultiturn" type="checkbox" checked>
+            打开多圈绝对位置控制（9/11 号角度限制写 0）
+          </label>
+          <div class="hint warn" id="provMultiturnNote">
+            实测本机：出厂 <b>11 号 = 4095</b> 会把行程锁在一圈内，写负的目标位置
+            协议层虽被接受但舵机<b>不动</b>；把 9/11 号都写成 0 之后负目标才会执行。
+            15 个关节里有 4 个 home 姿态角是负的，所以这一项默认打开。
+            代价是固件不再限制行程，行程要靠上层软件兜住。
+          </div>
+          <label class="check-row">
+            <input id="provResponseLevel" type="checkbox" checked>
+            写应答状态级别（8 号 = 1，保证后续所有指令都有应答）
+          </label>
+          <label class="check-row">
+            <input id="provReference" type="checkbox">
+            我已按提示把该关节摆到基准位（用 CAL / 位置偏移校准时必须勾选）
+          </label>
+
+          <div class="button-row">
+            <button id="btnProvCheck" class="btn">检测总线</button>
+            <button id="btnProvRun" class="btn btn-primary">开始初始化</button>
+            <button id="btnProvNext" class="btn">下一个关节</button>
+            <button id="btnProvTorqueOff" class="btn">关闭扭矩（卸力）</button>
+          </div>
+          <div id="provResult" class="result-box muted">尚未执行。</div>
+        </div>
+
+        <div class="card">
+          <h2>校验与点检</h2>
+          <div id="provSnapshot" class="metrics">
+            <div class="metric"><div class="metric-label">等待初始化</div><div class="metric-value">--</div><div class="metric-sub">完成后显示回读结果</div></div>
+          </div>
+          <div id="provCensus" class="table-wrap"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 03 实时反馈 -->
     <section id="tab-feedback" class="tab-panel">
       <div class="card">
         <div class="card-head">
@@ -157,7 +250,7 @@
       </div>
     </section>
 
-    <!-- 03 位置控制 -->
+    <!-- 04 位置控制 -->
     <section id="tab-position" class="tab-panel">
       <div class="card">
         <div class="card-head">
@@ -236,7 +329,7 @@
       </div>
     </section>
 
-    <!-- 04 速度 / 电流 / PWM -->
+    <!-- 05 速度 / 电流 / PWM -->
     <section id="tab-speed" class="tab-panel">
       <div class="card">
         <div class="card-head">
@@ -296,7 +389,7 @@
       </div>
     </section>
 
-    <!-- 05 参数配置 -->
+    <!-- 06 参数配置 -->
     <section id="tab-params" class="tab-panel">
       <div class="card">
         <div class="card-head">
@@ -314,7 +407,7 @@
       </div>
     </section>
 
-    <!-- 06 同步读写 -->
+    <!-- 07 同步读写 -->
     <section id="tab-sync" class="tab-panel">
       <div class="card">
         <h2>同步读（SYNC_READ，0x82）</h2>
@@ -369,7 +462,7 @@
       </div>
     </section>
 
-    <!-- 07 高级指令 -->
+    <!-- 08 高级指令 -->
     <section id="tab-advanced" class="tab-panel">
       <div class="grid-2">
         <div class="card">
@@ -421,7 +514,7 @@
       </div>
     </section>
 
-    <!-- 08 内存表参考 -->
+    <!-- 09 内存表参考 -->
     <section id="tab-memory" class="tab-panel">
       <div class="card">
         <div class="card-head">

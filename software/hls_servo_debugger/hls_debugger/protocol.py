@@ -31,7 +31,22 @@ INST_SYNC_WRITE = 0x83
 BROADCAST_ID = 0xFE
 NO_ADDR_INSTRUCTIONS = {INST_PING, INST_REG_ACTION, INST_RECOVERY, INST_RESET, INST_CAL}
 
+# 出厂新舵机的主 ID。microduck 的总线上没有任何关节使用 ID 1（IMU 节点是 200），
+# 所以"总线上的 ID 1"就是"一颗还没编号的新舵机"。
+FACTORY_ID = 1
+# 出厂新舵机的波特率编码，0 = 1 Mbps，与工具默认波特率一致。
+EXPECTED_BAUD_CODE = 0
+# microduck 的 IMU 节点也挂在这条总线上，占用 ID 200。
+IMU_BUS_ID = 200
+
 # HLS 内存表关键地址
+ADDR_ID = 5
+ADDR_BAUD_RATE = 6
+ADDR_SECOND_ID = 7
+ADDR_RESPONSE_LEVEL = 8
+ADDR_MIN_ANGLE_LIMIT = 9
+ADDR_MAX_ANGLE_LIMIT = 11
+ADDR_POSITION_OFFSET = 31
 ADDR_MODE = 33
 ADDR_TORQUE_ENABLE = 40
 ADDR_ACC = 41
@@ -567,8 +582,11 @@ class HLSBus(object):
 
     def set_mode(self, servo_id, mode):
         mode = int(mode)
-        if mode not in (0, 1, 2, 3):
-            raise ValueError("运行模式必须为 0~3")
+        # 厂商内存表把 33 号写成 0~3，但同一份内存表在 25 号"积分限制值"里注明
+        # "位置模式 0 与模式 4 生效"，且实测 HD-1910-C001（固件 3.46）出厂即为 4，
+        # 与模式 0 同属位置环，所以 4 也必须允许写入。
+        if mode not in (0, 1, 2, 3, 4):
+            raise ValueError("运行模式必须为 0~4")
         return self.write(servo_id, ADDR_MODE, bytes([mode]))
 
     def servo_mode(self, servo_id):
