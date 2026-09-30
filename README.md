@@ -3,7 +3,7 @@
 > 这不是官方Microduck仓库，<a href="https://github.com/pollen-robotics/microduck">官方仓库</a>在这里，感谢他们开源。本项目是复刻所需硬件PCB补充。
 
 主要包括：
-- **imu_to_dxl**：<a href="hardware/imu_to_dxl">身体传感器板</a>、<a href="firmware/v1">对应的固件</a>和<a href="firmware/v1/host">上位机测试软件</a>。特点：高度接近原版设计、高可靠设计、固件可在线升级。其中，飞特1910舵机官方代码<a href="firmware/v1/patches">参考补丁</a>在这里
+- **imu_to_dxl**：<a href="hardware/imu_to_dxl">身体传感器板</a>、<a href="firmware/v1">对应的固件</a>和<a href="firmware/v1/host">上位机测试软件</a>。特点：高度接近原版设计、高可靠设计、固件可在线升级。
 - **banana_pcb**：<a href="hardware/banana_pcb">电池上方的转接小板</a>
 - **dxl_hub**：<a href="hardware/dxl_hub">鸭鸭身体中的集线器板</a>
 - **飞特舵机调试软件**：<a href="software/hls_servo_debugger">飞特舵机调试软件</a>
@@ -38,7 +38,7 @@ git clone --recurse-submodules https://github.com/jyg9/microduck-community-kit.g
  - 项目主要使用了中国国内易于采购的飞特1910舵机，同时兼容原版XL330
  - 本项目在Linux平台开发，不能保证其他平台兼容性
  - 硬件是纯手工绘制，软件全部由AI编写和调试
- - imu_to_dxl如有需要，可在<a href="https://item.taobao.com/item.htm?ft=t&id=1085185543605">我的店铺</a>购买。（PS：第一版安装孔做小了0.1mm🙃，不过不太影响安装，仓库内设计文件已经修复）
+ - imu_to_dxl如有需要，可在<a href="https://item.taobao.com/item.htm?ft=t&id=1085185543605">我的店铺</a>购买。
  - 如果觉得项目不错，欢迎小额打赏😀，感谢各位老板支持。
 
 <img src="./docs/alipay.jpg" alt="3d view" width="100"/>
