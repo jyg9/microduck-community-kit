@@ -14,6 +14,7 @@ host/
 │   └── style.css
 └── tools/
     ├── bus_smoke.py     # 上板协议冒烟测试（两种协议 + 全部模拟模式）
+    ├── scope_traffic.py # 示波器用：单一已知帧、固定速率地重复（见第 4 节）
     ├── test_server.py   # HTTP + WebSocket 集成自检（不需要硬件）
     ├── test_protocols.c # 两个协议从站 + 模拟器的宿主单元测试（纯 gcc）
     ├── test_crc16.c     # CRC 与 rustypot/ROBOTIS 参考向量比对
@@ -98,6 +99,38 @@ BUS_PORT=/dev/ttyACM1 BUS_BAUD=1000000 ./build.sh smoke   # 换端口（默认 /
 `read` 与 `sync_read` 两种取数、持续轮询（采样率/时延 p95/超时/坏帧）、陀螺范围、
 四元数与重力单位性、采样计数连续性、**陀螺与四元数导数一致性**（这是最有价值的端到端检查），
 然后逐个切换 7 种模拟模式验证各自应有的现象，最后还原原配置。退出码非 0 表示有失败项。
+
+### `scope_traffic.py`（示波器，只读；`write` 模式除外）
+
+要把总线波形打上示波器，需要的是**一个已知帧、按固定速率无限重复**——`servo_probe.py` 是固定
+序列、`bus_smoke.py` 是判 pass/fail、`robotd` 是每 tick 都不同的 50 Hz 混合流量，都不合适。
+
+```bash
+# 最小帧：对一颗舵机 PING，20 Hz，一直发（Ctrl-C 停）
+tools/py.sh tools/scope_traffic.py --port /dev/ttyACM0 --mode ping --id 20 --hz 20
+# 机器人真实的一个 tick：广播 SYNC_READ 全部 16 个设备（含 IMU 节点）
+tools/py.sh tools/scope_traffic.py --port /dev/ttyACM0 --mode sync --hz 20
+# 启动时的短读：15 个关节、每台 2 字节
+tools/py.sh tools/scope_traffic.py --port /dev/ttyACM0 --mode sync-pos --hz 20
+# 广播 SYNC_WRITE：把每台舵机写回它**当前**位置（帧是真的，但不会动）
+tools/py.sh tools/scope_traffic.py --port /dev/ttyACM0 --mode write --hz 5 --confirm-motion-safe
+# 什么都不发，用来量空闲电平和上拉
+tools/py.sh tools/scope_traffic.py --port /dev/ttyACM0 --mode idle
+```
+
+启动时它会打印一份**时序速查表**（1 Mbps、8N1：1 bit = 1 µs，1 字节 = 10 µs，空闲高电平）：
+PING 请求/应答各 6 字节（60 µs，应答在请求结束后约 0.5 ms）；`SYNC_READ` 16 个 id 是 24 字节
+（240 µs）请求，每台回 21 字节（210 µs），槽长约 295 µs、按 id 顺序应答，整串到最后一台约
+**4.9 ms**；`SYNC_WRITE` 15 台是 53 字节（530 µs）、广播不应答。
+
+探哪里：任意舵机接头的**数据线 + GND**（半双工单线，空闲为高）。触发取第一个起始位的下降沿；
+20 µs/div 看两个字节，500 µs/div 看完整一串。要量"请求结束 → 第一台应答"的转向时间，
+以及"应答之间"的槽间距。
+
+两点注意：**跑之前确认端口只有它一个占用者**（`fuser /dev/ttyACM0`；robotd 用 TIOCEXCL
+打开，但 TIOCEXCL 不会拒绝已经打开的 fd，第二个进程会偷走一半字节）；脚本的 `--hz` 是
+主机侧 sleep 节拍（毫秒级抖动，示波器触发无所谓），而**总线上每一帧的位宽是硬件时钟**，
+那才是要量的东西。
 
 ### `servo_probe.py`（真舵机，只读）
 
