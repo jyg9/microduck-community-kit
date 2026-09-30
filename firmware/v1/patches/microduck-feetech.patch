@@ -309,10 +309,10 @@ index b53d572..d05b695 100644
  
  [dev-dependencies]
 diff --git a/duck-control/src/bus.rs b/duck-control/src/bus.rs
-index 083ab48..4eaf52b 100644
+index 083ab48..601074a 100644
 --- a/duck-control/src/bus.rs
 +++ b/duck-control/src/bus.rs
-@@ -1,72 +1,134 @@
+@@ -1,72 +1,142 @@
 -//! The Dynamixel bus.
 +//! The FeeTech servo bus.
  //!
@@ -490,10 +490,18 @@ index 083ab48..4eaf52b 100644
 +/// which is why this is not the Dynamixel path's 500 ms.
 +const REBOOT_SETTLE: Duration = Duration::from_millis(900);
 +
++/// How long the port is given after `open` before its first transaction.
++///
++/// See [`FeetechIo::open`]: a USB-serial adapter of this class drops the first transaction
++/// issued immediately after a close/open cycle, and 350 ms was measured to be enough on this
++/// bench (`host/bus.py`'s `OPEN_SETTLE_S`). This is that figure with a little margin — once per
++/// open, against a startup path that otherwise loses a servo and waits seconds for a retry.
++const OPEN_SETTLE: Duration = Duration::from_millis(400);
++
  /// Run of consecutive stale reads at which the journal says something.
  ///
  /// 25 reads is half a second at 50 Hz — the same span [`SflpDecoder::ready`] waits for before
-@@ -105,50 +167,537 @@ impl StaleImuTracker {
+@@ -105,50 +175,545 @@ impl StaleImuTracker {
      }
  }
  
@@ -792,6 +800,13 @@ index 083ab48..4eaf52b 100644
 +    /// configured with the burst's short idle timeout, and the only read the tick makes is one
 +    /// broadcast `sync_read`. `bus.fast_sync_read` in `robotd.toml` is therefore read by
 +    /// `robotd` and not passed here — see the module docs for why it has no meaning on this bus.
++    ///
++    /// The port is left to settle before it is used. A USB-serial adapter of this class drops
++    /// the *first* transaction after a close/open cycle: measured on this bench (2026-09-30,
++    /// `1a86:55d3` presenting as `ttyACM0`) four consecutive fresh starts of `robotd` each lost
++    /// the ping to the first servo in the census — id 20 every time — and each then sat in the
++    /// retry loop for over ten seconds. `host/bus.py` has carried the same constant
++    /// (`OPEN_SETTLE_S = 0.35`) for the same reason since it was first pointed at this hardware.
 +    pub fn open(port: &str) -> Result<Self> {
 +        let serial = serialport::new(port, BAUD_RATE)
 +            .timeout(BURST_IDLE)
@@ -800,6 +815,7 @@ index 083ab48..4eaf52b 100644
 +                path: port.to_owned(),
 +                source: std::io::Error::other(e),
 +            })?;
++        std::thread::sleep(OPEN_SETTLE);
 +        Ok(Self::with_transport(Box::new(SerialTransport(serial))))
 +    }
 +
@@ -1060,7 +1076,7 @@ index 083ab48..4eaf52b 100644
      pub fn check_registers(&mut self) -> Result<usize> {
          let mut fixed = 0;
          for &id in &JOINT_IDS {
-@@ -157,46 +706,33 @@ impl DynamixelIo {
+@@ -157,59 +722,51 @@ impl DynamixelIo {
          Ok(fixed)
      }
  
@@ -1126,7 +1142,17 @@ index 083ab48..4eaf52b 100644
      ///
      /// Fifteen pings, each bounded by [`READ_TIMEOUT`], so about half a second when the servos
      /// are unpowered and a few milliseconds when they are not. Run once at startup: this is
-@@ -205,11 +741,7 @@ impl DynamixelIo {
+     /// what decides whether [`Self::adopt_replacement`] has anything to do, and it is the only
+     /// bus traffic the replacement path costs a robot whose servos are all present.
++    ///
++    /// **A silent id is pinged twice before it counts as missing.** One lost frame is not a
++    /// missing servo, and this census is the input to a *destructive* decision: a single absent
++    /// id is what tells [`Self::adopt_replacement`] to go looking for a factory-fresh servo and
++    /// re-address it. Measured on the bench (15 servos on a CH340-class adapter, 2026-09-30): a
++    /// 15-ping sweep back to back loses one reply every few sweeps — one such miss made
++    /// `robotd` sit out fourteen seconds of retries before the next sweep came back clean. The
++    /// retry costs one [`READ_TIMEOUT`] per genuinely absent servo and turns a several-percent
++    /// false-missing rate into its square.
      pub fn missing_servos(&mut self) -> Result<Vec<u8>> {
          let mut missing = Vec::new();
          for &id in &JOINT_IDS {
@@ -1135,11 +1161,11 @@ index 083ab48..4eaf52b 100644
 -                .ping(id)
 -                .map_err(|e| IoError::Bus(format!("ping {id}: {e}")))?;
 -            if !answered {
-+            if !self.ping(id)? {
++            if !self.ping(id)? && !self.ping(id)? {
                  missing.push(id);
              }
          }
-@@ -218,19 +750,24 @@ impl DynamixelIo {
+@@ -218,19 +775,24 @@ impl DynamixelIo {
  
      /// Flash a factory-fresh servo so it takes the place of the one that is missing.
      ///
@@ -1152,30 +1178,30 @@ index 083ab48..4eaf52b 100644
 +    /// expected servo is silent, the fresh one can be found, re-addressed to the missing id,
 +    /// and then handed the same EEPROM check every other servo gets. That is the whole of a
 +    /// motor swap: nobody has to run a configuration tool first.
-+    ///
-+    /// The search is a single ping. The XL330 this bus replaced shipped at 57 600 baud and had
-+    /// to be looked for at that speed with a reopened port; an HLS servo already answers at the
-+    /// bus's own speed, so there is no second port speed to try and no `reopen` here.
      ///
 -    /// The servo is rebooted at the end, deliberately. A servo flashed this way comes out of it
 -    /// with its hardware-error alert set (the observation behind this whole path), and that
 -    /// alert holds torque off until the servo is power-cycled or rebooted. Rebooting here means
 -    /// the servo that comes out of this is indistinguishable from one that was always there.
-+    /// The servo is rebooted at the end, deliberately. `0x08` reloads RAM from EEPROM, which
-+    /// clears the error word at address 65 that a servo comes out of a factory flash holding —
-+    /// and that word is what holds torque off until a power cycle. Rebooting here means the
-+    /// servo that comes out of this is indistinguishable from one that was always there.
++    /// The search is a single ping. The XL330 this bus replaced shipped at 57 600 baud and had
++    /// to be looked for at that speed with a reopened port; an HLS servo already answers at the
++    /// bus's own speed, so there is no second port speed to try and no `reopen` here.
      ///
 -    /// Returns `Ok(false)` when nothing answers at the factory defaults: the servo is simply
 -    /// missing, or was replaced by one that is not fresh. The bus is back at [`BAUD_RATE`]
 -    /// either way, so the caller can keep waiting on it.
++    /// The servo is rebooted at the end, deliberately. `0x08` reloads RAM from EEPROM, which
++    /// clears the error word at address 65 that a servo comes out of a factory flash holding —
++    /// and that word is what holds torque off until a power cycle. Rebooting here means the
++    /// servo that comes out of this is indistinguishable from one that was always there.
++    ///
 +    /// Returns `Ok(false)` when nothing answers at the factory id: the servo is simply missing,
 +    /// or was replaced by one that is not fresh. The bus is left as it was either way, so the
 +    /// caller can keep waiting on it.
      pub fn adopt_replacement(&mut self, id: u8) -> Result<bool> {
          let name = JOINT_IDS
              .iter()
-@@ -238,75 +775,39 @@ impl DynamixelIo {
+@@ -238,75 +800,39 @@ impl DynamixelIo {
              .map(|i| JOINT_NAMES[i])
              .ok_or_else(|| IoError::Bus(format!("{id} is not a joint id")))?;
  
@@ -1267,7 +1293,7 @@ index 083ab48..4eaf52b 100644
              );
          }
          tracing::warn!(
-@@ -318,59 +819,45 @@ impl DynamixelIo {
+@@ -318,59 +844,45 @@ impl DynamixelIo {
          Ok(true)
      }
  
@@ -1348,7 +1374,7 @@ index 083ab48..4eaf52b 100644
                  failed.push(format!("torque {on} on {id}: {e}"));
              }
          }
-@@ -409,43 +896,7 @@ impl DynamixelIo {
+@@ -409,43 +921,7 @@ impl DynamixelIo {
      }
  }
  
@@ -1393,7 +1419,7 @@ index 083ab48..4eaf52b 100644
  ///
  /// Only an unambiguous answer is one: with two servos silent there is no telling which of them
  /// the new one replaces, and guessing would flash a leg joint as a neck joint. With none silent
-@@ -457,165 +908,176 @@ pub fn replacement_target(missing: &[u8]) -> Option<u8> {
+@@ -457,165 +933,176 @@ pub fn replacement_target(missing: &[u8]) -> Option<u8> {
      }
  }
  
@@ -1703,7 +1729,7 @@ index 083ab48..4eaf52b 100644
          })
      }
  
-@@ -630,7 +1092,10 @@ impl RobotIo for DynamixelIo {
+@@ -630,7 +1117,10 @@ impl RobotIo for DynamixelIo {
  
  #[cfg(test)]
  mod tests {
@@ -1714,7 +1740,7 @@ index 083ab48..4eaf52b 100644
  
      /// One silent servo is the only case a swap can be inferred from. With two silent there is
      /// no telling which the fresh servo replaces, and guessing would flash a leg joint as a neck
-@@ -643,36 +1108,769 @@ mod tests {
+@@ -643,36 +1133,769 @@ mod tests {
          assert_eq!(replacement_target(&JOINT_IDS), None);
      }
  

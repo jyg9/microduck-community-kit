@@ -129,6 +129,14 @@ const EEPROM_SETTLE: Duration = Duration::from_millis(20);
 /// which is why this is not the Dynamixel path's 500 ms.
 const REBOOT_SETTLE: Duration = Duration::from_millis(900);
 
+/// How long the port is given after `open` before its first transaction.
+///
+/// See [`FeetechIo::open`]: a USB-serial adapter of this class drops the first transaction
+/// issued immediately after a close/open cycle, and 350 ms was measured to be enough on this
+/// bench (`host/bus.py`'s `OPEN_SETTLE_S`). This is that figure with a little margin — once per
+/// open, against a startup path that otherwise loses a servo and waits seconds for a retry.
+const OPEN_SETTLE: Duration = Duration::from_millis(400);
+
 /// Run of consecutive stale reads at which the journal says something.
 ///
 /// 25 reads is half a second at 50 Hz — the same span [`SflpDecoder::ready`] waits for before
@@ -437,6 +445,13 @@ impl FeetechIo {
     /// configured with the burst's short idle timeout, and the only read the tick makes is one
     /// broadcast `sync_read`. `bus.fast_sync_read` in `robotd.toml` is therefore read by
     /// `robotd` and not passed here — see the module docs for why it has no meaning on this bus.
+    ///
+    /// The port is left to settle before it is used. A USB-serial adapter of this class drops
+    /// the *first* transaction after a close/open cycle: measured on this bench (2026-09-30,
+    /// `1a86:55d3` presenting as `ttyACM0`) four consecutive fresh starts of `robotd` each lost
+    /// the ping to the first servo in the census — id 20 every time — and each then sat in the
+    /// retry loop for over ten seconds. `host/bus.py` has carried the same constant
+    /// (`OPEN_SETTLE_S = 0.35`) for the same reason since it was first pointed at this hardware.
     pub fn open(port: &str) -> Result<Self> {
         let serial = serialport::new(port, BAUD_RATE)
             .timeout(BURST_IDLE)
@@ -445,6 +460,7 @@ impl FeetechIo {
                 path: port.to_owned(),
                 source: std::io::Error::other(e),
             })?;
+        std::thread::sleep(OPEN_SETTLE);
         Ok(Self::with_transport(Box::new(SerialTransport(serial))))
     }
 
@@ -738,10 +754,19 @@ impl FeetechIo {
     /// are unpowered and a few milliseconds when they are not. Run once at startup: this is
     /// what decides whether [`Self::adopt_replacement`] has anything to do, and it is the only
     /// bus traffic the replacement path costs a robot whose servos are all present.
+    ///
+    /// **A silent id is pinged twice before it counts as missing.** One lost frame is not a
+    /// missing servo, and this census is the input to a *destructive* decision: a single absent
+    /// id is what tells [`Self::adopt_replacement`] to go looking for a factory-fresh servo and
+    /// re-address it. Measured on the bench (15 servos on a CH340-class adapter, 2026-09-30): a
+    /// 15-ping sweep back to back loses one reply every few sweeps — one such miss made
+    /// `robotd` sit out fourteen seconds of retries before the next sweep came back clean. The
+    /// retry costs one [`READ_TIMEOUT`] per genuinely absent servo and turns a several-percent
+    /// false-missing rate into its square.
     pub fn missing_servos(&mut self) -> Result<Vec<u8>> {
         let mut missing = Vec::new();
         for &id in &JOINT_IDS {
-            if !self.ping(id)? {
+            if !self.ping(id)? && !self.ping(id)? {
                 missing.push(id);
             }
         }

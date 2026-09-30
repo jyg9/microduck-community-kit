@@ -704,3 +704,18 @@ BUS_PORT=/dev/ttyACM1 ./build.sh smoke         # 传感器感知的协议冒烟�
 * 文档：`docs/design/robotd-design.md`（§1.1 加"本树带飞特补丁"提示、总线图、
   `FeetechIo`、fast-sync-read 段落）与 `docs/design/simulation.md`、`deploy/robotd.toml`
   已同步；其余仍描述 XL330 寄存器的段落见补丁说明的未决事项。
+
+### 真机首跑（2026-09-30，15 舵机 + IMU 节点）
+
+第一次把打补丁的 `robotd` 跑在真机上（`/dev/ttyACM0`，速度策略 `2026-09-04_22-59-06_velocity.onnx`）。
+完整记录见 `patches/microduck_feetech_patch.md` 第六节，要点：
+
+* 跑通的：`check_registers` 15/15、50 Hz 环路 3858 ticks / 0 missed、策略加载、`robot init`
+  归位、**15 个关节实测≈目标（最大偏差 0.02 rad）**——位置标度（4096 counts/圈）与符号-幅值
+  编码在真机上成立；电池/温度/四元数都是真值。
+* 由此修的两处启动缺陷（`duck-control/src/bus.rs`）：`open()` 后等 `OPEN_SETTLE = 400 ms`
+  （CH340 类适配器开端口后第一笔事务必丢，`host/bus.py` 早有同一常数），以及普查里同一个 id
+  ping 两次才算缺失（一次丢帧会触发破坏性的改址流程）。
+* 真机整定项：`gain = 200` 让 `left_hip_yaw` 自激振荡（5 A、74 °C），厂商默认 32 安静
+  （110 mA、温度不升）。`deploy/robotd.toml` 的出厂值在飞特舵机上不能用。
+* 操作提示：同一 tty 只允许一个持有者（`fuser` 检查），`TIOCEXCL` 不会拒绝已存在的 fd。
