@@ -1747,7 +1747,16 @@ impl Default for PolicyParams {
             standing_action_scale: 1.0,
             // The prototype's `--standing-kp-ratio`.
             standing_gain_ratio: 0.8,
-            gain: 200,
+            // FeeTech HLS, not Dynamixel. The servo register is 0..254 with a documented 1/8
+            // scale (`duck_control::bus::FeetechIo::set_gain`), so the prototype's 200 — tuned
+            // against the XL330's 0..16383 — sits at the very top of it and makes the position
+            // loop self-oscillate. Measured on the bench (HD-1910-C001, 15 servos on a
+            // suspended duck, 2026-09-30): at 200 `left_hip_yaw` drew 4966-5388 mA with the
+            // joint sitting on its target, reached 74 °C and buzzed audibly; at 32 — the
+            // vendor's own EEPROM default — the same joint peaked at 110 mA and its
+            // temperature did not move over the powered window. See
+            // `firmware/v1/patches/microduck_feetech_patch.md` §6.
+            gain: 32,
             head_lowpass: None,
             legs_lowpass: None,
             ground_pick_period: None,
@@ -1766,7 +1775,9 @@ impl Default for SafetyParams {
             fall_gravity_z: -0.5,
             fall_debounce_ms: 200,
             deadman_ms: 500,
-            gain_limp: 50,
+            // A quarter of `policy.gain`, as it always was (200/50). Both moved together to
+            // the FeeTech scale — see the note on `PolicyParams::default().gain`.
+            gain_limp: 8,
             battery_empty_shutdown: true,
             limp_fall: false,
             limp_fall_tilt_z: -0.90,
@@ -1777,7 +1788,10 @@ impl Default for SafetyParams {
             limp_fall_still_ms: 200,
             limp_fall_max_ms: 1500,
             limp_fall_pose_ms: 600,
-            limp_fall_pose_gain: 160,
+            // 0.8 x `policy.gain`, the "softened standing gain" relationship it was chosen
+            // with (160 of 200); 0.8 x 32 rounds to 26. Unmeasured on FeeTech servos — the
+            // 32 above is the only figure with hardware behind it.
+            limp_fall_pose_gain: 26,
         }
     }
 }
@@ -3119,7 +3133,9 @@ mod tests {
         assert_eq!(p.action_scale, 0.9);
         assert_eq!(p.standing_action_scale, 1.0);
         assert_eq!(p.standing_gain_ratio, 0.8, "--standing-kp-ratio");
-        assert_eq!(p.gain, 200);
+        // Not the prototype's 200: this tree drives FeeTech servos, whose Kp register is
+        // 0..254 and self-oscillates at the top of it. See `PolicyParams::default`.
+        assert_eq!(p.gain, 32);
         assert_eq!(
             p.head_lowpass,
             Some(0.5),
@@ -3233,7 +3249,7 @@ mod tests {
             "the rebased roller line keeps the trained filters"
         );
         assert_eq!(p.legs_lowpass, Some(0.7));
-        assert_eq!(p.gain, 200);
+        assert_eq!(p.gain, 32);
     }
 
     /// `"none"` disables an optional slot outright — the prototype's `--sitstand-policy None`

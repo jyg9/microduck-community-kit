@@ -1052,10 +1052,11 @@ impl RobotIo for FeetechIo {
     /// needed: address 55 (`锁标志`) only governs whether EEPROM writes persist, and no EEPROM
     /// address is written here.
     ///
-    /// **Open item:** the scale means `deploy/robotd.toml`'s `gain = 200` sits at the very top of
-    /// the 0..254 range (`gain_limp = 50` is a quarter of it), and those numbers were tuned for
-    /// the XL330's 0..16383 scale. They must be re-tuned on hardware; this function cannot know
-    /// the right value. See the companion note's open items.
+    /// The gain this is called with comes from `policy.gain`, which this tree defaults to **32**
+    /// (the vendor's own EEPROM default) rather than the prototype's 200 — 200 is the top of the
+    /// 0..254 range here and makes the position loop self-oscillate, measured on the bench. The
+    /// value is still per-robot tuning: this function cannot know the right one. See the
+    /// companion note's §6 and its open item 2.
     ///
     /// **Every joint is written, whatever the others said**, matching [`FeetechIo::set_torque`]:
     /// one silent servo must not leave the rest of the robot on a stale gain.

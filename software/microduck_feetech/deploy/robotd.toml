@@ -152,8 +152,15 @@ mode = "walk"
 # standing_action_scale = 1.0
 # Standing runs softer, at this fraction of `gain`. The prototype's --standing-kp-ratio.
 # standing_gain_ratio = 0.8
-# Position P gain while running.
-# gain = 200
+
+# Position P gain while running. FeeTech servos, not XL330: the register is 0..254 and the
+# vendor's own EEPROM default is 32. The prototype's 200 was tuned against the XL330's
+# 0..16383 scale and sits at the top of this one — measured on the bench (15 servos on a
+# suspended duck, 2026-09-30), 200 made left_hip_yaw self-oscillate: 4966-5388 mA with the
+# joint on its target, 74 °C and an audible buzz, against 110 mA and a flat temperature at 32.
+# Still a per-robot number: retune it under load, and keep the provisioning tool's Kp in step
+# (`software/hls_servo_debugger`, which writes the same register at EEPROM 21).
+# gain = 32
 
 # First-order low-pass on the head and leg joint targets, as a blend factor in (0, 1].
 # 1.0 is pass-through (off). Unset resolves per mode: 0.5 / 0.7 walking — the values the
@@ -210,7 +217,8 @@ mode = "walk"
 # deadman_ms = 500
 
 # The gain limp-fall yields at — low enough to give way rather than fight the floor.
-# gain_limp = 50
+# A quarter of `gain`, as it was at 200/50; both moved to the FeeTech scale together.
+# gain_limp = 8
 
 # Land soft, then stand up from a still robot instead of a thrashing one.
 #
@@ -261,7 +269,8 @@ mode = "walk"
 # held in someone's hands does not stay limp forever.
 #
 # The pose ramp then travels the joints back to standing. Its gain is not the limp gain:
-# they have to actually move across the floor. 160 is the softened standing gain. 0.6 s was
+# they have to actually move across the floor. 26 is 0.8 x `gain` = the softened standing
+# gain (it was 160 of 200). Unmeasured on FeeTech servos. 0.6 s was
 # settled on at the robot: a full second is mostly dead time before the stand-up, since the
 # joints travel unloaded rather than lifting the robot, and 0.3 also worked — this keeps
 # some margin over it.
@@ -269,7 +278,7 @@ mode = "walk"
 # limp_fall_still_ms = 200
 # limp_fall_max_ms = 1500
 # limp_fall_pose_ms = 600
-# limp_fall_pose_gain = 160
+# limp_fall_pose_gain = 26
 
 # Sit down gracefully and power the machine off when the battery EMA reaches the empty
 # floor (6.6 V — the same value the battery percentage maps to 0%). The EMA moves over

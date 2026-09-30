@@ -136,7 +136,7 @@ index d18a151..cc00e8b 100644
  name = "test-support"
  version = "0.15.0"
 diff --git a/deploy/robotd.toml b/deploy/robotd.toml
-index 1c41492..afc7f3c 100644
+index 1c41492..b3cfcfa 100644
 --- a/deploy/robotd.toml
 +++ b/deploy/robotd.toml
 @@ -21,15 +21,10 @@
@@ -159,6 +159,53 @@ index 1c41492..afc7f3c 100644
  # fast_sync_read = true
  
  # Every value below that is commented out shows the built-in default. LEAVE IT COMMENTED
+@@ -157,8 +152,15 @@ mode = "walk"
+ # standing_action_scale = 1.0
+ # Standing runs softer, at this fraction of `gain`. The prototype's --standing-kp-ratio.
+ # standing_gain_ratio = 0.8
+-# Position P gain while running.
+-# gain = 200
++
++# Position P gain while running. FeeTech servos, not XL330: the register is 0..254 and the
++# vendor's own EEPROM default is 32. The prototype's 200 was tuned against the XL330's
++# 0..16383 scale and sits at the top of this one — measured on the bench (15 servos on a
++# suspended duck, 2026-09-30), 200 made left_hip_yaw self-oscillate: 4966-5388 mA with the
++# joint on its target, 74 °C and an audible buzz, against 110 mA and a flat temperature at 32.
++# Still a per-robot number: retune it under load, and keep the provisioning tool's Kp in step
++# (`software/hls_servo_debugger`, which writes the same register at EEPROM 21).
++# gain = 32
+ 
+ # First-order low-pass on the head and leg joint targets, as a blend factor in (0, 1].
+ # 1.0 is pass-through (off). Unset resolves per mode: 0.5 / 0.7 walking — the values the
+@@ -215,7 +217,8 @@ mode = "walk"
+ # deadman_ms = 500
+ 
+ # The gain limp-fall yields at — low enough to give way rather than fight the floor.
+-# gain_limp = 50
++# A quarter of `gain`, as it was at 200/50; both moved to the FeeTech scale together.
++# gain_limp = 8
+ 
+ # Land soft, then stand up from a still robot instead of a thrashing one.
+ #
+@@ -266,7 +269,8 @@ mode = "walk"
+ # held in someone's hands does not stay limp forever.
+ #
+ # The pose ramp then travels the joints back to standing. Its gain is not the limp gain:
+-# they have to actually move across the floor. 160 is the softened standing gain. 0.6 s was
++# they have to actually move across the floor. 26 is 0.8 x `gain` = the softened standing
++# gain (it was 160 of 200). Unmeasured on FeeTech servos. 0.6 s was
+ # settled on at the robot: a full second is mostly dead time before the stand-up, since the
+ # joints travel unloaded rather than lifting the robot, and 0.3 also worked — this keeps
+ # some margin over it.
+@@ -274,7 +278,7 @@ mode = "walk"
+ # limp_fall_still_ms = 200
+ # limp_fall_max_ms = 1500
+ # limp_fall_pose_ms = 600
+-# limp_fall_pose_gain = 160
++# limp_fall_pose_gain = 26
+ 
+ # Sit down gracefully and power the machine off when the battery EMA reaches the empty
+ # floor (6.6 V — the same value the battery percentage maps to 0%). The EMA moves over
 diff --git a/docs/design/robotd-design.md b/docs/design/robotd-design.md
 index 581f927..c50b86d 100644
 --- a/docs/design/robotd-design.md
@@ -309,7 +356,7 @@ index b53d572..d05b695 100644
  
  [dev-dependencies]
 diff --git a/duck-control/src/bus.rs b/duck-control/src/bus.rs
-index 083ab48..601074a 100644
+index 083ab48..c686e0e 100644
 --- a/duck-control/src/bus.rs
 +++ b/duck-control/src/bus.rs
 @@ -1,72 +1,142 @@
@@ -1419,7 +1466,7 @@ index 083ab48..601074a 100644
  ///
  /// Only an unambiguous answer is one: with two servos silent there is no telling which of them
  /// the new one replaces, and guessing would flash a leg joint as a neck joint. With none silent
-@@ -457,165 +933,176 @@ pub fn replacement_target(missing: &[u8]) -> Option<u8> {
+@@ -457,165 +933,177 @@ pub fn replacement_target(missing: &[u8]) -> Option<u8> {
      }
  }
  
@@ -1659,10 +1706,11 @@ index 083ab48..601074a 100644
 +    /// needed: address 55 (`锁标志`) only governs whether EEPROM writes persist, and no EEPROM
 +    /// address is written here.
 +    ///
-+    /// **Open item:** the scale means `deploy/robotd.toml`'s `gain = 200` sits at the very top of
-+    /// the 0..254 range (`gain_limp = 50` is a quarter of it), and those numbers were tuned for
-+    /// the XL330's 0..16383 scale. They must be re-tuned on hardware; this function cannot know
-+    /// the right value. See the companion note's open items.
++    /// The gain this is called with comes from `policy.gain`, which this tree defaults to **32**
++    /// (the vendor's own EEPROM default) rather than the prototype's 200 — 200 is the top of the
++    /// 0..254 range here and makes the position loop self-oscillate, measured on the bench. The
++    /// value is still per-robot tuning: this function cannot know the right one. See the
++    /// companion note's §6 and its open item 2.
 +    ///
 +    /// **Every joint is written, whatever the others said**, matching [`FeetechIo::set_torque`]:
 +    /// one silent servo must not leave the rest of the robot on a stale gain.
@@ -1729,7 +1777,7 @@ index 083ab48..601074a 100644
          })
      }
  
-@@ -630,7 +1117,10 @@ impl RobotIo for DynamixelIo {
+@@ -630,7 +1118,10 @@ impl RobotIo for DynamixelIo {
  
  #[cfg(test)]
  mod tests {
@@ -1740,7 +1788,7 @@ index 083ab48..601074a 100644
  
      /// One silent servo is the only case a swap can be inferred from. With two silent there is
      /// no telling which the fresh servo replaces, and guessing would flash a leg joint as a neck
-@@ -643,36 +1133,769 @@ mod tests {
+@@ -643,36 +1134,769 @@ mod tests {
          assert_eq!(replacement_target(&JOINT_IDS), None);
      }
  
@@ -3328,6 +3376,71 @@ index 53cd9a8..cfd627f 100644
  ///
  /// This is the *actuator's* travel, not a per-joint anatomical limit — the alpha robot's
  /// real joint limits live in the MJCF, which is not vendored here. So this catches a policy
+diff --git a/robotd-params/src/lib.rs b/robotd-params/src/lib.rs
+index 75fbaed..c3e1467 100644
+--- a/robotd-params/src/lib.rs
++++ b/robotd-params/src/lib.rs
+@@ -1747,7 +1747,16 @@ impl Default for PolicyParams {
+             standing_action_scale: 1.0,
+             // The prototype's `--standing-kp-ratio`.
+             standing_gain_ratio: 0.8,
+-            gain: 200,
++            // FeeTech HLS, not Dynamixel. The servo register is 0..254 with a documented 1/8
++            // scale (`duck_control::bus::FeetechIo::set_gain`), so the prototype's 200 — tuned
++            // against the XL330's 0..16383 — sits at the very top of it and makes the position
++            // loop self-oscillate. Measured on the bench (HD-1910-C001, 15 servos on a
++            // suspended duck, 2026-09-30): at 200 `left_hip_yaw` drew 4966-5388 mA with the
++            // joint sitting on its target, reached 74 °C and buzzed audibly; at 32 — the
++            // vendor's own EEPROM default — the same joint peaked at 110 mA and its
++            // temperature did not move over the powered window. See
++            // `firmware/v1/patches/microduck_feetech_patch.md` §6.
++            gain: 32,
+             head_lowpass: None,
+             legs_lowpass: None,
+             ground_pick_period: None,
+@@ -1766,7 +1775,9 @@ impl Default for SafetyParams {
+             fall_gravity_z: -0.5,
+             fall_debounce_ms: 200,
+             deadman_ms: 500,
+-            gain_limp: 50,
++            // A quarter of `policy.gain`, as it always was (200/50). Both moved together to
++            // the FeeTech scale — see the note on `PolicyParams::default().gain`.
++            gain_limp: 8,
+             battery_empty_shutdown: true,
+             limp_fall: false,
+             limp_fall_tilt_z: -0.90,
+@@ -1777,7 +1788,10 @@ impl Default for SafetyParams {
+             limp_fall_still_ms: 200,
+             limp_fall_max_ms: 1500,
+             limp_fall_pose_ms: 600,
+-            limp_fall_pose_gain: 160,
++            // 0.8 x `policy.gain`, the "softened standing gain" relationship it was chosen
++            // with (160 of 200); 0.8 x 32 rounds to 26. Unmeasured on FeeTech servos — the
++            // 32 above is the only figure with hardware behind it.
++            limp_fall_pose_gain: 26,
+         }
+     }
+ }
+@@ -3119,7 +3133,9 @@ mod tests {
+         assert_eq!(p.action_scale, 0.9);
+         assert_eq!(p.standing_action_scale, 1.0);
+         assert_eq!(p.standing_gain_ratio, 0.8, "--standing-kp-ratio");
+-        assert_eq!(p.gain, 200);
++        // Not the prototype's 200: this tree drives FeeTech servos, whose Kp register is
++        // 0..254 and self-oscillates at the top of it. See `PolicyParams::default`.
++        assert_eq!(p.gain, 32);
+         assert_eq!(
+             p.head_lowpass,
+             Some(0.5),
+@@ -3233,7 +3249,7 @@ mod tests {
+             "the rebased roller line keeps the trained filters"
+         );
+         assert_eq!(p.legs_lowpass, Some(0.7));
+-        assert_eq!(p.gain, 200);
++        assert_eq!(p.gain, 32);
+     }
+ 
+     /// `"none"` disables an optional slot outright — the prototype's `--sitstand-policy None`
 diff --git a/robotd-params/src/registry.rs b/robotd-params/src/registry.rs
 index 55046bd..9859874 100644
 --- a/robotd-params/src/registry.rs
@@ -3354,9 +3467,20 @@ index 55046bd..9859874 100644
      // ── [control] ────────────────────────────────────────────────────────────
      entry("control.hz", Kind::Integer, "Control loop rate"),
 diff --git a/robotd/src/main.rs b/robotd/src/main.rs
-index ab574b6..6154e7a 100644
+index ab574b6..9823991 100644
 --- a/robotd/src/main.rs
 +++ b/robotd/src/main.rs
+@@ -1060,8 +1060,8 @@ fn run_init(params: &Params, duration: Duration) -> ExitCode {
+     }
+     // Before the ramp, not after: position_p_gain is a RAM register that survives this
+     // process, so whatever was written last is what the robot stands up with. A previous fall
+-    // leaves `gain_limp` (50) there, and `init` would then take the robot to its home pose at
+-    // a third of the intended stiffness — soft enough to be a fall risk in the one command
++    // leaves `gain_limp` (8) there, and `init` would then take the robot to its home pose at
++    // a quarter of the intended stiffness — soft enough to be a fall risk in the one command
+     // whose whole job is establishing a known state.
+     //
+     // `robotd`'s control loop sets its own gain on the first tick, so this only governs the
 @@ -1172,7 +1172,7 @@ fn spawn_control_thread(
  
  /// The real bus on the board; a fake elsewhere, so `open_bus_waiting` has one signature.

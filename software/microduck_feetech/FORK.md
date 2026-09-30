@@ -18,7 +18,7 @@ Dynamixel XL330 换成**飞特 HD-1910-C001（SCS/HLS 协议）**的补丁。可
   （与 `duck-control/src/feetech.rs` 逐字节一致）
 
 主要改动一句话：`duck-control` 的 `DynamixelIo` → `FeetechIo`，不再依赖 `rustypot`，
-自己实现飞特帧收发，坐标/速度/电流按厂商的**符号-幅值**编码解码。
+自己实现飞特帧收发，坐标/速度/电流按厂商的**符号-幅值**编码解码；增益默认值改成飞特标度。
 
 ## 编译与自测
 
@@ -29,6 +29,7 @@ cd software/microduck_feetech
 
 cargo check -p duck-control -p robotd   # 只编译总线与守护进程
 cargo test -p duck-control              # 总线协议与控制的单元测试，不需要硬件
+cargo test -p robotd-params             # 参数默认值（含增益）
 ```
 
 已知情况（2026-09-29/30，本机 Ubuntu x86-64）：
@@ -38,18 +39,21 @@ cargo test -p duck-control              # 总线协议与控制的单元测试�
 * `cargo test -p robotd`：有 2 个用例失败，原因是本机 ONNX Runtime / 模型文件差异，**与总线无关**
   （在未打补丁的同一基线提交上同样失败），详见补丁说明第一节
 * `cargo check --workspace --all-targets`：需要系统 gstreamer（`mediad`/`uyvy`），
-  本机没装，因此只验证了 `duck-control` 与 `robotd`
+  本机没装，因此只验证了 `duck-control`、`robotd-params` 与 `robotd`
 
 ## 上车前必须知道
 
 这套补丁已在 **15 舵机 + IMU 节点**的真机上跑过（2026-09-30，记录见补丁说明第六节）：
 总线、50 Hz 环路、寄存器检查、归位、15 个关节跟随目标都通过。但下面三件事必须自己确认：
 
-1. **`deploy/robotd.toml` 的 `gain = 200` 在飞特舵机上不能用。** 200 是 FeeTech Kp 寄存器
-   0..254 的顶格（那个数值是按 XL330 的 0..16383 标度调的）。实测 `gain = 200` 时
-   `left_hip_yaw` 自激振荡：电流 2.4–5.4 A、壳温 74 °C、剧烈抖动；改成厂商默认 **32**
-   之后峰值电流 110 mA、通电 6 s 温度不升。请在自己的 `robotd.toml` 里覆盖 `gain`
-   （台面从 32 起），并在真实负载下按关节整定。
+1. **增益默认值已按飞特标度改过，但只有台面证据，仍要按关节整定。** 默认 `gain` 从原型的
+   200 改成了 **32**（厂商 EEPROM 默认值），派生值 `gain_limp = 8`、`limp_fall_pose_gain = 26`
+   按原来的 1/4 与 0.8 比例跟着缩。原因是实测：`gain = 200` 时 `left_hip_yaw` 自激振荡——
+   电流 2.4–5.4 A、壳温 74 °C、剧烈抖动；改成 32 后峰值 110 mA、通电 6 s 温度不升。
+   200 是 FeeTech Kp 寄存器 0..254 的顶格（原值按 XL330 的 0..16383 标度调），而 32 是在
+   **悬空、无负载**的台面上测的：负载下的稳定裕度、站立与起步手感仍要自己重调。
+   `software/hls_servo_debugger` 的初始化会写同一个寄存器（EEPROM 21/22 + RAM 50/51），
+   两处的值要一致。
 2. **一次只让一个进程持有串口。** robotd 用 `TIOCEXCL` 打开端口，但 `TIOCEXCL` 只拦*之后*的
    `open()`，不会拒绝已经打开的 fd。若另一个工具（例如调试器 GUI）先占着同一个 tty，
    两个进程会各读走一半字节，现象是每个 tick 随机丢几个舵机、看起来像节点挂了。
@@ -63,6 +67,8 @@ cargo test -p duck-control              # 总线协议与控制的单元测试�
 ## 与上游的关系
 
 * 上游仓库：<https://github.com/pollen-robotics/microduck>（本项目只是复刻配套，非官方）
+* 与上游的**行为差异**不止总线：增益默认值（`policy.gain`、`safety.gain_limp`、
+  `safety.limp_fall_pose_gain`）也按飞特舵机改过，详见补丁说明第一节第 12 条。
 * 上游的 `docs/design/*.md` 里仍有按 XL330 叙述的段落，本目录只同步了协议与命名的部分，
   未重写的范围在补丁说明未决事项 7 中列出；**冲突时以补丁说明为准**。
 * 需要回到官方总线时：在本目录里 `git apply -R ../../firmware/v1/patches/microduck-feetech.patch`
