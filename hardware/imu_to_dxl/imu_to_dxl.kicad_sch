@@ -10377,7 +10377,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "10k"
+		(property "Value" "100k"
 			(at 149.86 106.68 0)
 			(effects
 				(font
@@ -10476,7 +10476,7 @@
 				(hide yes)
 			)
 		)
-		(property "LCSC Part" "C25744"
+		(property "LCSC Part" "C25741"
 			(at 154.94 107.95 0)
 			(effects
 				(font
@@ -13202,7 +13202,7 @@
 				)
 			)
 		)
-		(property "Value" "100R"
+		(property "Value" "51R"
 			(at 105.41 25.4 0)
 			(effects
 				(font
@@ -13255,7 +13255,7 @@
 				(hide yes)
 			)
 		)
-		(property "LCSC Part" "C110091"
+		(property "LCSC Part" "C2907181"
 			(at 105.41 29.21 0)
 			(effects
 				(font
@@ -19319,7 +19319,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "3.3V ESD"
+		(property "Value" "5V ESD"
 			(at 102.87 41.9099 90)
 			(effects
 				(font
@@ -19355,7 +19355,7 @@
 				(hide yes)
 			)
 		)
-		(property "Manufacturer Part" "TUSD03FB"
+		(property "Manufacturer Part" ""
 			(at 96.52 39.37 0)
 			(effects
 				(font
@@ -19364,7 +19364,7 @@
 				(hide yes)
 			)
 		)
-		(property "Manufacturer" "SPSEMI(瞬雷电子)"
+		(property "Manufacturer" ""
 			(at 96.52 39.37 0)
 			(effects
 				(font
@@ -19373,7 +19373,7 @@
 				(hide yes)
 			)
 		)
-		(property "LCSC Part" "C46551335"
+		(property "LCSC Part" "C19224"
 			(at 96.52 39.37 0)
 			(effects
 				(font
