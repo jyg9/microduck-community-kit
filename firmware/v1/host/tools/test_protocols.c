@@ -363,6 +363,383 @@ static void test_dxl_sync_read(void)
     }
 }
 
+/* ── Fast Sync Read (0x8A) ─────────────────────────────────────────────── */
+
+/* The aggregate-packet parser, transcribed from rustypot 1.8's
+   `parse_fast_sync_read_status_with_error` (src/dynamixel_protocol/v2.rs) - the
+   reference consumer this firmware has to match byte for byte.  It is here so a
+   test can check the whole packet a Fast Sync Read produces and not only the
+   block this node sends, and it is exercised on the protocol 2.0 e-manual
+   example below, which is what makes it a transcription rather than a parser
+   written to agree with the implementation under test.
+
+   Returns 0 and fills out/errs (out may be NULL) on success. */
+static int fast_ref_parse(const uint8_t *data, uint16_t total,
+                          const uint8_t *ids, uint16_t nids, uint16_t xlen,
+                          uint8_t *out, uint8_t *errs, uint16_t *nvalues)
+{
+    uint16_t block_size = (uint16_t)(xlen + 4U);
+    uint16_t payload;
+    uint16_t i;
+
+    if (total != (uint16_t)(8U + (nids * block_size))) {
+        return -1;
+    }
+    if (total < 8U || data[4] != DXL_BROADCAST_ID || data[7] != DXL_STATUS_MARKER) {
+        return -2;
+    }
+    payload = (uint16_t)((uint16_t)data[5] | ((uint16_t)data[6] << 8));
+    if (payload != (uint16_t)(total - 7U)) {
+        return -3;
+    }
+    for (i = 0U; i < nids; i++) {
+        uint16_t block = (uint16_t)(8U + (i * block_size));
+        uint16_t crc_at = (uint16_t)(block + 2U + xlen);
+        uint16_t read_crc = (uint16_t)((uint16_t)data[crc_at]
+                                       | ((uint16_t)data[crc_at + 1U] << 8));
+        if (read_crc != crc16_dxl(data, crc_at)) {
+            return -4;
+        }
+        if (data[block + 1U] != ids[i]) {
+            return -5;
+        }
+        if (NULL != out) {
+            memcpy(&out[i * xlen], &data[block + 2U], xlen);
+        }
+        if (NULL != errs) {
+            errs[i] = data[block];
+        }
+    }
+    *nvalues = nids;
+    return 0;
+}
+
+/* microduck's joint order (duck-control/src/model.rs `JOINT_IDS`), so the id list
+   the tests build is the one the runtime builds. */
+static const uint8_t g_joint_ids[15] = {
+    20U, 21U, 22U, 23U, 24U, 30U, 31U, 32U, 33U, 34U, 10U, 11U, 12U, 13U, 14U
+};
+
+/* ROBOTIS protocol 2.0 e-manual, "Fast Sync Read (0x8A)" example: ids 3, 7 and 4
+   answer a read of present position (addr 132, X = 4) with 166, 2079 and 1023.
+   The same 32 bytes are rustypot 1.8's FAST_SYNC_READ_STATUS test vector. */
+static const uint8_t g_fast_example[32] = {
+    0xFF, 0xFF, 0xFD, 0x00, 0xFE, 0x19, 0x00, 0x55,
+    0x00, 0x03, 0xA6, 0x00, 0x00, 0x00, 0x84, 0x08,
+    0x00, 0x07, 0x1F, 0x08, 0x00, 0x00, 0x16, 0xCA,
+    0x00, 0x04, 0xFF, 0x03, 0x00, 0x00, 0xD1, 0x9E
+};
+
+/*! \brief the 8 bytes the device heading the id list sends:
+           `FF FF FD 00 FE LEN_L LEN_H 0x55`, LEN covering the whole packet. */
+static void fast_write_prefix(uint8_t *pkt, uint16_t total)
+{
+    pkt[0] = DXL_HEADER_0;
+    pkt[1] = DXL_HEADER_1;
+    pkt[2] = DXL_HEADER_2;
+    pkt[3] = DXL_HEADER_3;
+    pkt[4] = DXL_BROADCAST_ID;
+    pkt[5] = (uint8_t)(total & 0xFFU);
+    pkt[6] = (uint8_t)(total >> 8);
+    pkt[7] = DXL_STATUS_MARKER;
+}
+
+/*! \brief append a block to an aggregate packet the way a real servo does:
+           ERROR, ID, DATA, then the CRC of everything including this block. */
+static uint16_t fast_synth_block(uint8_t *pkt, uint16_t at, uint8_t id,
+                                 uint8_t seed, uint16_t xlen)
+{
+    uint16_t i;
+    uint16_t crc;
+
+    pkt[at] = 0U;
+    pkt[at + 1U] = id;
+    for (i = 0U; i < xlen; i++) {
+        pkt[at + 2U + i] = (uint8_t)(seed + i);
+    }
+    crc = crc16_dxl(pkt, (uint16_t)(at + 2U + xlen));
+    pkt[at + 2U + xlen] = (uint8_t)(crc & 0xFFU);
+    pkt[at + 3U + xlen] = (uint8_t)(crc >> 8);
+    return (uint16_t)(at + 4U + xlen);
+}
+
+/*! \brief one received byte as src/bus.c handles it: the fast-sync feeder first,
+           the frame parser after. */
+static uint16_t dxl_bus_feed(dxl_slave_t *s, uint8_t byte, uint8_t *out)
+{
+    uint16_t n = dxl_slave_fast_rx(s, byte, out, DXL_MAX_RESP);
+
+    if (0U == n) {
+        n = dxl_slave_feed(s, byte, 1000U, out, DXL_MAX_RESP);
+    }
+    return n;
+}
+
+static void test_dxl_fast_ref(void)
+{
+    static const uint8_t ids[3] = { 3U, 7U, 4U };
+    uint8_t vals[12];
+    uint8_t errs[3];
+    uint16_t nv = 0U;
+    uint16_t i;
+
+    g_case = "fast sync read: reference parser on the e-manual packet";
+    check(fast_ref_parse(g_fast_example, sizeof(g_fast_example), ids, 3U, 4U,
+                         vals, errs, &nv) == 0, "the e-manual example parses");
+    check(nv == 3U, "three blocks");
+    check(vals[0] == 0xA6U && vals[1] == 0x00U && vals[2] == 0x00U && vals[3] == 0x00U,
+          "id 3 = 166");
+    check(vals[4] == 0x1FU && vals[5] == 0x08U, "id 7 = 2079");
+    check(vals[8] == 0xFFU && vals[9] == 0x03U, "id 4 = 1023");
+    for (i = 0U; i < 3U; i++) {
+        check(errs[i] == 0U, "error byte is its own field");
+    }
+    /* The parser has to be strict, or agreeing with it means nothing: the
+       negative cases are rustypot's own. */
+    {
+        static const uint8_t wrong_order[3] = { 3U, 4U, 7U };
+        uint8_t flipped[32];
+        check(fast_ref_parse(g_fast_example, 32U, wrong_order, 3U, 4U, vals, errs, &nv) != 0,
+              "ids in an order we did not ask for are rejected");
+        memcpy(flipped, g_fast_example, sizeof(flipped));
+        flipped[10] ^= 0x01U;
+        check(fast_ref_parse(flipped, 32U, ids, 3U, 4U, vals, errs, &nv) != 0,
+              "one flipped data byte is rejected");
+        check(fast_ref_parse(g_fast_example, 24U, ids, 3U, 4U, vals, errs, &nv) != 0,
+              "a packet one block short is rejected");
+    }
+}
+
+static void test_dxl_fast_sync_read(void)
+{
+    dxl_slave_t s;
+    uint8_t out[DXL_MAX_RESP];
+    uint8_t params[4U + 16U];
+    uint8_t pkt[8U + (16U * 16U)];
+    uint8_t ids[16];
+    uint8_t vals[16U * 12U];
+    uint8_t errs[16];
+    uint16_t nv = 0U;
+    uint16_t n;
+    uint16_t at;
+    uint16_t i;
+
+    /* microduck's tick read: id list [IMU, servos...] at address 124, 12 bytes -
+       the node is entry 0, which is the case the runtime exercises. */
+    g_case = "dxl fast_sync_read lists us first";
+    reset_dev();
+    dxl_slave_init(&s);
+    params[0] = 124U; params[1] = 0U; params[2] = 12U; params[3] = 0U;
+    params[4] = 200U;
+    for (i = 0U; i < 15U; i++) {
+        params[5U + i] = g_joint_ids[i];
+    }
+    n = dxl_run(&s, DXL_BROADCAST_ID, DXL_INST_FAST_SYNC_READ, params, 20U, out);
+    check(n == 24U, "prefix + our 12-byte block, nothing else");
+    {
+        /* The instruction rustypot 1.8 actually generates for this read.  It is
+           pinned here and asserted against rustypot's own output in
+           host/tools/rustypot_check, so these two agree on the bytes the node is
+           handed as well as on the bytes it answers with. */
+        static const uint8_t want_instr[30] = {
+            0xFF, 0xFF, 0xFD, 0x00, 0xFE, 0x17, 0x00, 0x8A, 0x7C, 0x00,
+            0x0C, 0x00, 0xC8, 0x14, 0x15, 0x16, 0x17, 0x18, 0x1E, 0x1F,
+            0x20, 0x21, 0x22, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x5F, 0x95
+        };
+        uint8_t instr[DXL_MAX_FRAME];
+        uint16_t ilen = dxl_frame(DXL_BROADCAST_ID, DXL_INST_FAST_SYNC_READ,
+                                  params, 20U, instr);
+        check(ilen == 30U, "the instruction is 30 bytes");
+        if (ilen == 30U) {
+            check_bytes(instr, want_instr, 30U, "rustypot's own instruction bytes");
+        }
+    }
+    {
+        /* The exact 24 bytes the firmware puts on the wire for microduck's tick
+           read with the register image this test installs (g_dxl[124 + i] = i).
+           host/tools/rustypot_check feeds the same vector to the real rustypot
+           parser, so both halves of that check are pinned to one number. */
+        static const uint8_t want24[24] = {
+            0xFF, 0xFF, 0xFD, 0x00, 0xFE, 0x01, 0x01, 0x55,
+            0x00, 0xC8, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+            0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x8E, 0xA1
+        };
+        if (n == 24U) {
+            check_bytes(out, want24, 24U, "the block, byte for byte");
+        }
+    }
+    if (n == 24U) {
+        check(out[0] == 0xFFU && out[1] == 0xFFU && out[2] == 0xFDU && out[3] == 0x00U,
+              "header");
+        check(out[4] == DXL_BROADCAST_ID, "the aggregate answers as 0xFE");
+        check((uint16_t)(out[5] | ((uint16_t)out[6] << 8)) == 257U,
+              "LEN covers all 16 blocks (1 + 16 * 16)");
+        check(out[7] == DXL_STATUS_MARKER, "0x55 status marker");
+        check(out[8] == 0U, "error byte");
+        check(out[9] == 200U, "our own id inside the block");
+        check(out[10] == 0U && out[21] == 11U, "the 12 telemetry bytes");
+        {
+            uint16_t want = crc16_dxl(out, 22U);
+            check(out[22] == (uint8_t)(want & 0xFFU) && out[23] == (uint8_t)(want >> 8),
+                  "CRC covers the prefix and our block");
+        }
+    }
+
+    /* Complete that packet the way the fifteen servos behind us would, and read
+       it back with the reference parser: this is what robotd gets to see. */
+    g_case = "dxl fast_sync_read: the completed packet parses";
+    memcpy(pkt, out, 24U);
+    at = 24U;
+    for (i = 0U; i < 15U; i++) {
+        at = fast_synth_block(pkt, at, g_joint_ids[i], (uint8_t)(0x10U + i), 12U);
+    }
+    check(at == 8U + (16U * 16U), "16 blocks, 264 bytes");
+    for (i = 0U; i < 16U; i++) {
+        ids[i] = (0U == i) ? 200U : g_joint_ids[i - 1U];
+    }
+    check(fast_ref_parse(pkt, at, ids, 16U, 12U, vals, errs, &nv) == 0,
+          "the aggregate packet of 16 devices parses");
+    check(nv == 16U, "16 values back");
+    for (i = 0U; i < 12U; i++) {
+        check(vals[i] == (uint8_t)i, "the IMU block comes back first, byte for byte");
+    }
+    check(errs[0] == 0U && errs[15] == 0U, "error bytes line up with the blocks");
+
+    g_case = "dxl fast_sync_read without us";
+    dxl_slave_init(&s);
+    for (i = 0U; i < 16U; i++) {
+        params[4U + i] = (uint8_t)(10U + i);
+    }
+    n = dxl_run(&s, DXL_BROADCAST_ID, DXL_INST_FAST_SYNC_READ, params, 20U, out);
+    check(n == 0U, "silent when the id list does not name us");
+
+    g_case = "dxl fast_sync_read mid-list waits for the block ahead";
+    reset_dev();
+    dxl_slave_init(&s);
+    params[4] = 10U; params[5] = 200U; params[6] = 11U;   /* we are entry 1 */
+    n = dxl_run(&s, DXL_BROADCAST_ID, DXL_INST_FAST_SYNC_READ, params, 7U, out);
+    check(n == 0U, "nothing goes out before the device ahead has finished");
+    fast_write_prefix(pkt, 49U);         /* LEN = 1 + 3 * 16 */
+    at = fast_synth_block(pkt, 8U, 10U, 0x40U, 12U);     /* -> 24 */
+    for (i = 0U; i < 24U; i++) {
+        n = dxl_bus_feed(&s, pkt[i], out);
+        if ((i + 1U) < 24U) {
+            check(n == 0U, "still waiting while the block ahead is arriving");
+        }
+    }
+    check(n == 16U, "our block goes out on the byte that completes the one ahead");
+    if (n == 16U) {
+        check(out[0] == 0U && out[1] == 200U, "ERROR + our id, no prefix of our own");
+        check(out[2] == 0U && out[13] == 11U, "our 12 telemetry bytes");
+        memcpy(&pkt[24], out, 16U);
+        at = fast_synth_block(pkt, 40U, 11U, 0x80U, 12U);
+        check(at == 8U + (3U * 16U), "a complete 3-block packet");
+        {
+            static const uint8_t ids3[3] = { 10U, 200U, 11U };
+            check(fast_ref_parse(pkt, at, ids3, 3U, 12U, vals, errs, &nv) == 0,
+                  "the packet with our block in the middle parses");
+            for (i = 0U; i < 12U; i++) {
+                check(vals[12U + i] == (uint8_t)i, "our block landed in entry 1");
+            }
+            check(errs[1] == 0U, "and carries no error");
+        }
+    }
+
+    g_case = "dxl fast_sync_read mid-list drops a stream that is not ours";
+    dxl_slave_init(&s);
+    (void)dxl_run(&s, DXL_BROADCAST_ID, DXL_INST_FAST_SYNC_READ, params, 7U, out);
+    check(dxl_bus_feed(&s, 0x00U, out) == 0U, "a byte that cannot start the packet");
+    /* the obligation is gone: the real prefix and block now pass unremarked */
+    fast_write_prefix(pkt, 49U);         /* LEN = 1 + 3 * 16 */
+    at = fast_synth_block(pkt, 8U, 10U, 0x40U, 12U);
+    n = 0U;
+    for (i = 0U; i < at; i++) {
+        n = dxl_bus_feed(&s, pkt[i], out);
+    }
+    check(n == 0U, "no block is sent into a packet we already gave up on");
+
+    g_case = "dxl fast_sync_read waits out a gap before the first block";
+    reset_dev();
+    dxl_slave_init(&s);
+    params[0] = 124U; params[1] = 0U; params[2] = 12U; params[3] = 0U;
+    params[4] = 10U; params[5] = 200U; params[6] = 11U;
+    (void)dxl_run(&s, DXL_BROADCAST_ID, DXL_INST_FAST_SYNC_READ, params, 7U, out);
+    /* What the >BUS_GAP_US rule does when the device ahead has not spoken yet:
+       it must NOT throw the obligation away - that device is allowed its own
+       return delay time, and on a factory-fresh servo that is 500 us. */
+    dxl_slave_reset(&s);
+    fast_write_prefix(pkt, 49U);
+    at = fast_synth_block(pkt, 8U, 10U, 0x40U, 12U);
+    n = 0U;
+    for (i = 0U; i < at; i++) {
+        n = dxl_bus_feed(&s, pkt[i], out);
+    }
+    check(n == 16U, "the block still goes out after the gap");
+
+    g_case = "dxl fast_sync_read drops a stream that breaks mid-packet";
+    dxl_slave_init(&s);
+    (void)dxl_run(&s, DXL_BROADCAST_ID, DXL_INST_FAST_SYNC_READ, params, 7U, out);
+    fast_write_prefix(pkt, 49U);
+    at = fast_synth_block(pkt, 8U, 10U, 0x40U, 12U);
+    check(dxl_bus_feed(&s, pkt[0], out) == 0U, "the prefix has started");
+    dxl_slave_reset(&s);            /* the stream broke after it started */
+    n = 0U;
+    for (i = 1U; i < at; i++) {
+        n = dxl_bus_feed(&s, pkt[i], out);
+    }
+    check(n == 0U, "no block is sent into a broken aggregate");
+
+    g_case = "dxl fast_sync_read does not byte-stuff";
+    reset_dev();
+    dxl_slave_init(&s);
+    g_dxl[124] = 0xFFU; g_dxl[125] = 0xFFU; g_dxl[126] = 0xFDU;
+    params[4] = 200U;                    /* a list of one: LEN = 1 + 16 */
+    n = dxl_run(&s, DXL_BROADCAST_ID, DXL_INST_FAST_SYNC_READ, params, 5U, out);
+    check(n == 24U, "prefix + block, no growth");
+    if (n == 24U) {
+        check(out[10] == 0xFFU && out[11] == 0xFFU && out[12] == 0xFDU,
+              "FF FF FD survives verbatim in the payload");
+    }
+
+    g_case = "dxl fast_sync_read status return level 0";
+    dxl_slave_init(&s);
+    g_dxl[68] = 0U;
+    n = dxl_run(&s, DXL_BROADCAST_ID, DXL_INST_FAST_SYNC_READ, params, 5U, out);
+    check(n == 0U, "silent, like every other read");
+    g_dxl[68] = 2U;
+
+    g_case = "dxl fast_sync_read range error";
+    dxl_slave_init(&s);
+    params[0] = 250U; params[1] = 0U; params[2] = 12U; params[3] = 0U;
+    n = dxl_run(&s, DXL_BROADCAST_ID, DXL_INST_FAST_SYNC_READ, params, 5U, out);
+    check(n == 24U, "the block keeps its size");
+    if (n == 24U) {
+        check(out[8] == DXL_ERR_RANGE, "range error in the block's error byte");
+        check(out[10] == 0U && out[21] == 0U, "with a zeroed payload");
+    }
+
+    g_case = "dxl fast_sync_read malformed and impossible lists";
+    dxl_slave_init(&s);
+    n = dxl_run(&s, DXL_BROADCAST_ID, DXL_INST_FAST_SYNC_READ, params, 3U, out);
+    check(n == 0U, "fewer than four parameters is silence");
+    dxl_slave_init(&s);
+    params[0] = 124U; params[1] = 0U; params[2] = 0xF0U; params[3] = 0x01U;  /* X = 496 */
+    n = dxl_run(&s, DXL_BROADCAST_ID, DXL_INST_FAST_SYNC_READ, params, 5U, out);
+    check(n == 0U, "a read longer than the register space is silence");
+    {
+        /* 260 ids of 260 bytes each: the aggregate LEN would not fit in 16 bits,
+           so the packet cannot exist and this node does not join it */
+        uint8_t many[4U + 260U];
+        dxl_slave_init(&s);
+        many[0] = 124U; many[1] = 0U; many[2] = 0x00U; many[3] = 0x01U;  /* X = 256 */
+        for (i = 0U; i < 260U; i++) {
+            many[4U + i] = (0U == i) ? 200U : (uint8_t)(30U + i);
+        }
+        n = dxl_run(&s, DXL_BROADCAST_ID, DXL_INST_FAST_SYNC_READ, many, 4U + 260U, out);
+        check(n == 0U, "a LEN that cannot be expressed is silence");
+    }
+}
+
 static void test_dxl_errors(void)
 {
     dxl_slave_t s;
@@ -1058,6 +1435,8 @@ int main(void)
     test_dxl_ping();
     test_dxl_read();
     test_dxl_sync_read();
+    test_dxl_fast_ref();
+    test_dxl_fast_sync_read();
     test_dxl_errors();
     test_stuffing();
     test_dxl_status_stuffing();

@@ -404,6 +404,16 @@
 #define DXL_INST_CLEAR          0x10
 #define DXL_INST_SYNC_READ      0x82
 #define DXL_INST_SYNC_WRITE     0x83
+/* Fast Sync Read: the *instruction* is a SYNC_READ byte for byte with a
+   different opcode, but the answer is a different packet shape - every
+   addressed device appends one block (ERR + ID + DATA + CRC) to a single status
+   packet whose id is 0xFE, the CRC of a block covers the whole packet up to
+   that block, and nothing is byte-stuffed.  So the first device in the id list
+   sends the 8-byte prefix and the others only add their own block, and a device
+   that is not first has to hear the blocks ahead of it before it can answer at
+   all (src/dxl2.c, "fast sync read").  microduck's tick read puts this node at
+   index 0, which is the cheap case. */
+#define DXL_INST_FAST_SYNC_READ 0x8A
 #define DXL_INST_BULK_READ      0x92
 #define DXL_INST_BULK_WRITE     0x93
 

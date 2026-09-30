@@ -169,10 +169,10 @@ static void stats_print(uint32_t now_ms)
              (unsigned)m.rx_bytes, (unsigned)m.tx_bytes, (unsigned)m.rx_dropped,
              (unsigned)m.rx_errors, (unsigned)m.echoed, (unsigned)m.frames,
              (unsigned)m.answered, proto_name(m.last_proto));
-    DBG_INFO("  bus held=%u/%u lost=%u gaps=%u loop_max=%uus",
+    DBG_INFO("  bus held=%u/%u lost=%u gaps=%u ignored=%u loop_max=%uus",
              (unsigned)d.deferred, (unsigned)m.deferred,
              (unsigned)(d.tx_lost + m.tx_lost), (unsigned)(d.gaps + m.gaps),
-             (unsigned)s_loop_max_us);
+             (unsigned)(d.ignored + m.ignored), (unsigned)s_loop_max_us);
     s_loop_max_us = 0U;
     {
         /* integer millidegrees/s: nano.specs does not format floats unless

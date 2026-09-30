@@ -14,6 +14,11 @@
         arbitration happens - this is for debug tools that move it into the
         middle, where transmitting immediately would talk over the devices ahead
         of us and destroy *their* replies on the single-wire bus.
+      * a Fast Sync Read (0x8A) has no reply slots to count: the devices build
+        one packet between them and each block is shorter than a slot, so the
+        block of a node that is not first is timed by the bytes ahead of it
+        (src/dxl2.c, `dxl_slave_fast_rx`).  It goes out from the same interrupt
+        path, one byte after the block before it ends.
 */
 
 #include "bus.h"
@@ -123,6 +128,23 @@ static void bus_emit(bus_port_t *bp, uint8_t proto, uint16_t len, uint32_t now_u
     }
 }
 
+/* A Fast Sync Read block whose turn has come.  Its slotting is done in dxl2.c -
+   it counts the bytes of the blocks ahead of us, which is the only thing that
+   works when a block is ~160 us and a 0x82 reply slot is ~295 us - so this is a
+   plain send and the deferral above must not see it. */
+static void bus_emit_now(bus_port_t *bp, uint8_t proto, uint16_t len)
+{
+    bus_note_proto(bp, proto, systick_get_ms());
+
+    if (0U != bp->defer_pending) {
+        bp->defer_pending = 0U;
+        bus_arb_cancel(&bp->arb);
+    }
+    if (0U == uart_port_write_dma(&bp->port, bp->tx, len)) {
+        bp->tx_lost++;
+    }
+}
+
 /* ── receive (interrupt context) ────────────────────────────────────────── */
 
 static void bus_on_byte(uint8_t index, uint8_t byte)
@@ -154,6 +176,16 @@ static void bus_on_byte(uint8_t index, uint8_t byte)
     proto_allow(bp, dev_cfg()->proto_lock, now_ms, &allow_dxl, &allow_fee);
 
     if (0U != allow_dxl) {
+        /* Fast Sync Read status bytes first: while this node owes a block, the
+           bytes arriving are the blocks of the devices ahead of it, and they are
+           what its own CRC has to cover.  The feeder answers from here, in the
+           interrupt, on the byte that completes the block before ours - the same
+           latency budget as every other reply. */
+        n = dxl_slave_fast_rx(&bp->dxl, byte, bp->tx, (uint16_t)sizeof(bp->tx));
+        if (0U != n) {
+            bus_emit_now(bp, PROTO_DXL, n);
+            return;
+        }
         n = dxl_slave_feed(&bp->dxl, byte, now_ms, bp->tx, (uint16_t)sizeof(bp->tx));
         if (0U != n) {
             bus_emit(bp, PROTO_DXL, n, now_us);

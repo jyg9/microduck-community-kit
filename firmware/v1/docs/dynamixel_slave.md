@@ -80,11 +80,12 @@ ROBOTIS SDK 的 `update_crc`：多项式 `0x8005`、初值 0、**高位在前**�
 | `0x10` | CLEAR | ✅ | 清硬件错误状态（地址 70/71） |
 | `0x82` | SYNC_READ | ✅ | 仅在 ID 列表包含本机 ID 时应答（**本机排在列表第一位时最先应答**，正是 microduck 依赖的顺序） |
 | `0x83` | SYNC_WRITE | ✅ | 仅在列表包含本机 ID 时写入；**不应答** |
+| `0x8A` | FAST_SYNC_READ | ✅ | 指令与 `0x82` 同形；应答是**所有设备共拼的一个聚合状态帧**（`ID=0xFE`，每台按 ID 列表顺序各发 `ERR + ID + DATA + 累积 CRC`，**不填充**，第 0 台额外发 8 字节前缀，`LEN = 1 + N×(X+4)`）。本机在第 k 位时**按前面 k 段的字节数**让位（不是 300 µs 槽，一段只有约 `(X+4)×10 µs`）；前导设备缺席则整包本就无效，本机静默（见 `imu_to_dxl_protocol.md` §3.2.1） |
 | `0x92` | BULK_READ | ✅ | 参数布局为 `(ADDR,LEN) × N + ID × N`（`LEN` 共 7N 字节） |
 | 其它 | — | 应答 `ERR=0x40`（Instruction Error），广播时静默 |
 
 `STATUS_RETURN_LEVEL`（寄存器 68，默认 2）按协议生效：0 = 只有 PING 应答；
-1 = PING + READ/SYNC_READ；2 = 全部。
+1 = PING + READ/SYNC_READ/FAST_SYNC_READ；2 = 全部。
 
 ### 错误位（与 rustypot 的解码一致）
 

@@ -46,6 +46,21 @@ typedef struct {
     /* Where the last sync_read put us in its id list; see src/bus_arb.h. */
     uint8_t  sync_named;
     uint8_t  sync_index;
+    /* Fast Sync Read (0x8A): one status packet is built by every addressed
+       device in turn, and the CRC of a block covers everything on the wire up to
+       that block.  A node that is not first therefore has to hear the blocks
+       ahead of it before it can answer at all, which is what this state carries -
+       see the "fast sync read" note in src/dxl2.c.  The node that IS first
+       answers from the instruction frame and never touches any of it. */
+    uint8_t  fast_active;       /* a block of ours is owed                    */
+    uint8_t  fast_index;        /* our position in the instruction id list    */
+    uint8_t  fast_rlen;         /* how many bytes it asked for                */
+    uint8_t  fast_err;          /* error byte our block reports               */
+    uint8_t  fast_data[REG_SPACE_SIZE];     /* payload, read on arrival       */
+    uint16_t fast_total;        /* LEN of the aggregate packet                */
+    uint16_t fast_seen;         /* bytes of it heard so far                   */
+    uint16_t fast_need;         /* bytes to hear before our block goes out    */
+    uint16_t fast_crc;          /* running CRC over what we have heard        */
     /* statistics */
     uint32_t frames;
     uint32_t answered;
@@ -65,5 +80,12 @@ void dxl_slave_reset(dxl_slave_t *s);
     \retval length of the response to transmit, 0 when there is nothing to send */
 uint16_t dxl_slave_feed(dxl_slave_t *s, uint8_t byte, uint32_t now_ms,
                         uint8_t *out, uint16_t out_max);
+
+/*! \brief consume one byte of a Fast Sync Read status packet while a block of
+           ours is pending, in interrupt context.
+    \retval length of our block once the devices ahead of us are done, 0 while
+            there is nothing to send yet (the common case) */
+uint16_t dxl_slave_fast_rx(dxl_slave_t *s, uint8_t byte,
+                           uint8_t *out, uint16_t out_max);
 
 #endif /* DXL2_H */

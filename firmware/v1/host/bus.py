@@ -51,6 +51,12 @@ FEE_DIAG_ADDR = FEE_TELEM_ALT_ADDR
 
 TELEM_LEN = 20
 CTRL_LEN = 12
+#: Longest Dynamixel frame the scanner will believe: one status packet is at most
+#: 7 + 256 + 4 bytes, and a Fast Sync Read *aggregate* is longer still - it is
+#: `8 + N*(X+4)` for every device in the id list (microduck's 16 devices of 12
+#: bytes make 264).  The bound only stops a corrupted LEN from making the scanner
+#: wait for bytes that will never come; the CRC is what decides the frame.
+DXL_MAX_FRAME = 520
 #: FeeTech 56..70: the 12 control bytes plus counter and status, which is the
 #: span the runtime reads in the shared `sync_read` (src/board.h FEE_BLOCK_*).
 FEE_BLOCK_LEN = 15
@@ -129,6 +135,7 @@ DXL_INST = {
     "clear": 0x10,
     "sync_read": 0x82,
     "sync_write": 0x83,
+    "fast_sync_read": 0x8A,
     "bulk_read": 0x92,
 }
 FEE_INST = {
@@ -256,6 +263,55 @@ def dxl_sync_write(ids: Sequence[int], addr: int, payloads: Sequence[bytes]) -> 
             raise ValueError("all sync_write payloads must have the same width")
         params += bytes([pid]) + payload
     return dxl_instruction(DXL_BROADCAST, DXL_INST["sync_write"], params)
+
+
+def dxl_fast_sync_read(ids: Sequence[int], addr: int, length: int) -> bytes:
+    """The 0x8A instruction: byte for byte a SYNC_READ with a different opcode.
+
+    The *answer* is not: the devices build one status packet between them (id
+    `0xFE`), each appending `ERROR ID DATA CRC`, the CRC covering everything up to
+    its own block - see [`dxl_parse_fast_sync_read`].  Nothing is byte-stuffed.
+    """
+    params = struct.pack("<HH", addr, length) + bytes(ids)
+    return dxl_instruction(DXL_BROADCAST, DXL_INST["fast_sync_read"], params)
+
+
+def dxl_fast_sync_block(pid: int, data: bytes, error: int = 0, upto: bytes = b"") -> bytes:
+    """One device's contribution to a Fast Sync Read packet.
+
+    `upto` is everything already on the wire (the prefix and the blocks ahead of
+    this one); the CRC that ends the block covers it plus this block.
+    """
+    block = bytes([error, pid]) + data
+    return block + struct.pack("<H", crc16_dxl(upto + block))
+
+
+def dxl_parse_fast_sync_read(frame: bytes, ids: Sequence[int],
+                             length: int) -> list[tuple[bytes, int]]:
+    """Split an aggregate Fast Sync Read packet into `[(data, error), ...]`.
+
+    Transcribed from rustypot 1.8's `parse_fast_sync_read_status_with_error`:
+    every block's running CRC is checked (which is what pins the block positions)
+    and the id in a block must be the one that was asked for in that slot.  Raises
+    `ProtocolError` when anything does not line up.
+    """
+    block_size = length + 4
+    if len(frame) != 8 + len(ids) * block_size:
+        raise ProtocolError(f"aggregate length {len(frame)} != {8 + len(ids) * block_size}")
+    if frame[4] != DXL_BROADCAST or frame[7] != 0x55:
+        raise ProtocolError("aggregate packet must answer as 0xFE with 0x55")
+    if struct.unpack_from("<H", frame, 5)[0] != len(frame) - 7:
+        raise ProtocolError("aggregate LEN does not match the packet")
+    out: list[tuple[bytes, int]] = []
+    for i, pid in enumerate(ids):
+        block = 8 + i * block_size
+        crc_at = block + 2 + length
+        if struct.unpack_from("<H", frame, crc_at)[0] != crc16_dxl(frame[:crc_at]):
+            raise ProtocolError(f"block {i} CRC mismatch")
+        if frame[block + 1] != pid:
+            raise ProtocolError(f"block {i} is id {frame[block + 1]}, expected {pid}")
+        out.append((bytes(frame[block + 2:crc_at]), frame[block]))
+    return out
 
 
 def dxl_parse_status(frame: bytes) -> tuple[int, int, bytes]:
@@ -707,7 +763,7 @@ class Link:
                 return None, start
             length = int.from_bytes(buf[start + 5 : start + 7], "little")
             total = 7 + length
-            if length < 3 or total > 264:
+            if length < 3 or total > DXL_MAX_FRAME:
                 return None, start + 2
             if len(buf) < start + total:
                 return None, start
@@ -812,6 +868,45 @@ class Link:
             frame = self._transaction(fee_read(self.imu_id, addr, length))
             _pid, _err, params = fee_parse_ack(frame)
         return frame, params
+
+    def fast_sync_read(self, ids: Sequence[int], addr: int, length: int,
+                       feed: bytes = b"", want: Optional[int] = None) -> bytes:
+        """Send a Fast Sync Read (0x8A) and return the node's raw answer.
+
+        A Fast Sync Read status packet is built by every addressed device in turn,
+        so what comes back depends on where this node sits in the id list:
+
+        * **first** (index 0, which is where microduck puts the IMU node): the
+          node sends the 8-byte prefix and its own block straight away.  The
+          default `want=None` reads one whole aggregate packet, which only
+          completes if every id in the list answers - on a bench with no servos
+          pass `want=length + 12` (prefix + one block) or let a caller append the
+          missing blocks;
+        * **later**: the node stays silent until it has heard the blocks ahead of
+          it, so those have to be on the wire right behind the instruction -
+          `feed` carries them (`dxl_fast_sync_block` builds one).  The answer is
+          then `length + 4` bytes with no header of its own.
+        """
+        assert self._ser is not None
+        self._ser.reset_input_buffer()
+        self._ser.write(dxl_fast_sync_read(ids, addr, length) + feed)
+        if want is None:
+            return self._read_frame()
+        deadline = time.monotonic() + self.timeout
+        buf = bytearray()
+        # Anything the scanner was still holding belongs to an earlier, abandoned
+        # transaction: `_read_frame` leaves a partial frame in `self._rx` when it
+        # times out, and seeding this read with those bytes would splice the tail
+        # of an old reply onto the front of this one (measured: it decoded as a
+        # block with a stale counter and a flag byte that is never set).
+        self._rx.clear()
+        while len(buf) < want:
+            chunk = self._ser.read(want - len(buf))
+            if chunk:
+                buf.extend(chunk)
+            elif time.monotonic() >= deadline:
+                raise TimeoutError(f"fast sync read: {len(buf)}/{want} bytes")
+        return bytes(buf)
 
     def write_registers(self, addr: int, data: bytes, expect_ack: bool = True) -> bool:
         """Write registers.  Returns True when the node acknowledged.
@@ -1001,6 +1096,29 @@ def _self_test() -> int:
     check("status parse rejects bad crc",
           _raises(lambda: dxl_parse_status(bytes.fromhex("FF FF FD 00 01 08 00 55 00 A6 00 00 00 8C C1"))),
           True)
+
+    # Fast Sync Read: one aggregate packet, built by all the devices in turn.
+    # The vector is the protocol 2.0 e-manual's (and rustypot's) example: ids
+    # 3/7/4 answer a read of present position (addr 132, 4 bytes).
+    fast_example = bytes.fromhex(
+        "FF FF FD 00 FE 19 00 55 00 03 A6 00 00 00 84 08"
+        " 00 07 1F 08 00 00 16 CA 00 04 FF 03 00 00 D1 9E")
+    check("fast_sync_read [1,2] addr=132", dxl_fast_sync_read([1, 2], 132, 4).hex(" ").upper(),
+          "FF FF FD 00 FE 09 00 8A 84 00 04 00 01 02 4D 72")
+    check("fast_sync_read parse (e-manual)",
+          dxl_parse_fast_sync_read(fast_example, [3, 7, 4], 4),
+          [(bytes([0xA6, 0, 0, 0]), 0), (bytes([0x1F, 8, 0, 0]), 0), (bytes([0xFF, 3, 0, 0]), 0)])
+    flipped = fast_example[:10] + bytes([fast_example[10] ^ 0x01]) + fast_example[11:]
+    check("fast_sync_read rejects a flipped data byte",
+          _raises(lambda: dxl_parse_fast_sync_read(flipped, [3, 7, 4], 4)), True)
+    check("fast_sync_read rejects ids in the wrong order",
+          _raises(lambda: dxl_parse_fast_sync_read(fast_example, [3, 4, 7], 4)), True)
+    check("fast_sync_read rejects a packet one block short",
+          _raises(lambda: dxl_parse_fast_sync_read(fast_example[:24], [3, 7, 4], 4)), True)
+    check("fast_sync_read block builder (id 3, first)",
+          dxl_fast_sync_block(3, bytes([0xA6, 0, 0, 0]), 0,
+                              fast_example[:8]).hex(" ").upper(),
+          fast_example[8:16].hex(" ").upper())
 
     # byte stuffing (rustypot 1.6 de-stuffs status bodies, so the node must stuff)
     check("stuffing: no pattern", dxl_add_stuffing(bytes([1, 2, 0xFF, 0xFD, 3])).hex(" ").upper(),

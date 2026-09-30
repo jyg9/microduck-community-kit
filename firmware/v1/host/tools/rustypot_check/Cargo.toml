@@ -1,0 +1,15 @@
+[package]
+name = "rustypot_fast_sync_check"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Check the imu_to_dxl Fast Sync Read bytes against the real rustypot parser"
+
+# Pinned to the versions microduck 1.x uses (Cargo.toml of duck-control): the
+# point of this harness is to run *that* parser, not one that merely looks like it.
+# `default-features = false` on serialport drops its `libudev` feature (port
+# enumeration), the same way microduck does - without it the build needs a
+# pkg-config sysroot that is not part of a firmware checkout.
+[dependencies]
+rustypot = "=1.8.0"
+serialport = { version = "=4.9.0", default-features = false }

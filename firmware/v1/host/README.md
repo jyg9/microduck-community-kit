@@ -14,6 +14,8 @@ host/
 │   └── style.css
 └── tools/
     ├── bus_smoke.py     # 上板协议冒烟测试（两种协议 + 全部模拟模式）
+    ├── fast_sync_read_check.py  # 上板 0x8A 验收（第 0 位 / 第 1 位 / 未点名）
+    ├── rustypot_check/  # 与官方 rustypot 1.8 解析器对拍 0x8A（需要 Rust）
     ├── scope_traffic.py # 示波器用：单一已知帧、固定速率地重复（见第 4 节）
     ├── test_server.py   # HTTP + WebSocket 集成自检（不需要硬件）
     ├── test_protocols.c # 两个协议从站 + 模拟器的宿主单元测试（纯 gcc）
@@ -38,6 +40,12 @@ source .venv/bin/activate
 ```
 
 C 测试只需要 `gcc`；协议自检 `bus.py` 在缺 pyserial 时也能跑（只有实链路部分需要它）。
+`tools/rustypot_check/` 额外需要 Rust 工具链与 crates.io 缓存（它跑的是真的 rustypot 1.8，
+不是它的复制品），因此**不**在 `./build.sh test` 里，改 `0x8A` 路径后手动执行：
+
+```bash
+cd tools/rustypot_check && cargo run --release        # 打印 5 项断言结果
+```
 
 ## 2. 使用
 

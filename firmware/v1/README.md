@@ -34,7 +34,8 @@
 | 功能 | 状态 | 验证方式 |
 |---|---|---|
 | 系统时钟 120 MHz（12 MHz 晶振） | ✅ | 上板运行（LED 心跳 + 串口 banner） |
-| Dynamixel 2.0 从站（PING/READ/WRITE/REG/SYNC_READ/SYNC_WRITE/BULK_READ/RESET/REBOOT/CLEAR） | ✅ | `host/tools/test_protocols.c` 逐字节比对 rustypot 参考向量 |
+| Dynamixel 2.0 从站（PING/READ/WRITE/REG/SYNC_READ/SYNC_WRITE/**FAST_SYNC_READ 0x8A**/BULK_READ/RESET/REBOOT/CLEAR） | ✅ | `host/tools/test_protocols.c` 逐字节比对 rustypot 参考向量；`host/tools/rustypot_check/` 再用**真的 rustypot 1.8 解析器**对拍 |
+| Dynamixel 2.0 `0x8A` 聚合应答（`ID=0xFE`、不填充、逐段累积 CRC、按字节数让位） | ✅ | C 测试（含 e-manual 32 字节向量与 `FF FF FD` 反证）+ 真机 `host/tools/fast_sync_read_check.py`（19 项，见 `docs/imu_to_dxl_protocol.md` §11(c2) 与 `docs/bus_timing_borrow_plan.md` §7.8）；真 XL330 同总线未验证，见 `docs/imu_to_dxl_protocol.md` §15.5 第 11 项 |
 | Dynamixel 2.0 字节填充（`FF FF FD`） | ✅ | 同上 + `src/stuffing.c` 单元测试（rustypot 1.6 会解填充） |
 | 飞特 SCS/HLS 从站（PING/READ/WRITE/REG/ACTION/RECOVERY/**REBOOT 0x08**/RESET/CAL/SYNC_READ/SYNC_WRITE） | ✅ | 同上 + `host/bus.py` 自检 |
 | 协议自动识别 + 粘滞 + 可锁定 | ✅ | `host/tools/bus_smoke.py`（上板后可跑） |
@@ -282,6 +283,13 @@ BUS_PORT=/dev/ttyUSB0 BUS_BAUD=1000000 ./build.sh smoke      # 仅台架镜像�
 
 # 4c) 真 LSM6DSV16X 只读表征探针（四元数/加速度/重力夹角/零偏/SFLP 重启；见 §8.6）
 ./host/tools/py.sh host/tools/sensor_probe.py --port /dev/ttyACM0
+
+# 4d) Fast Sync Read（0x8A）验收：本机在第 0 位 / 第 1 位 / 未被点名三种位置
+./host/tools/py.sh host/tools/fast_sync_read_check.py --port /dev/ttyACM0
+./host/tools/py.sh host/tools/fast_sync_read_check.py --self-test       # 不需要硬件
+
+# 4e) 与官方 rustypot 解析器对拍（需要 Rust 工具链，故不在 ./build.sh test 里）
+cd host/tools/rustypot_check && cargo run --release && cd -
 
 # 5) 现场升级（详见 docs/upgrade.md）
 ./build.sh status  build/gd32f303cc_imu_to_dxl_slot_b.ipkg    # 需不需要升级？
