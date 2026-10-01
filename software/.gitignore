@@ -57,7 +57,9 @@ target/
 *.pdb
 
 # ===== C# / .NET =====
-bin/
+# 裸 `bin/` 会匹配任意层级的 bin 目录，把 `duck-detect/src/bin/` 这类源码目录一起排除掉。
+bin/Debug/
+bin/Release/
 obj/
 *.user
 *.suo

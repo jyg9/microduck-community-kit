@@ -22,7 +22,10 @@ build/
 dist/
 out/
 target/
-bin/
+# .NET 的输出目录。**不要**写成裸 `bin/`：git 的 `dir/` 规则匹配**任意层级**的同名目录，
+# 会把 `duck-detect/src/bin/`、`pet-detect/src/bin/` 这类**源码**目录一起排除掉。
+bin/Debug/
+bin/Release/
 obj/
 Debug/
 Release/
@@ -37,10 +40,15 @@ Release/
 *.elf
 *.hex
 *.bin
+# `robotctl/assets/duck.bin` 是源码资产（robotctl 要读的固件/资源），不是构建产物。
+!software/microduck_feetech/robotctl/assets/duck.bin
 *.map
 *.lst
 *.su
 *.d
+# `*.d` 同时匹配以 `.d` 结尾的**目录**，会吃掉 systemd 的 sysusers.d / journald.conf.d。
+!sysusers.d/
+!*.conf.d/
 *.pdb
 
 # ===== 日志 / 临时文件 =====
