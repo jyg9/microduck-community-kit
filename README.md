@@ -34,6 +34,26 @@
 git clone --recurse-submodules https://github.com/jyg9/microduck-community-kit.git
 ```
 
+固件升级方法：
+- 1、SFTP复制本项目<a href="firmware/v1/host">主机工具</a>下的`upgrade.py`、`package.py`、`bus.py`到目标电脑。目标电脑可也是鸭子后台，也可以是电脑接USB转舵机TTL
+- 2、从项目Releases下载编译好的固件，两个文件`gd32f303cc_imu_to_dxl_slot_a.ipkg`和`gd32f303cc_imu_to_dxl_slot_b.ipkg`，同样复制到目标电脑
+- 3、执行升级指令：
+```bash
+# 看目前节点版本号等信息，需不需要升级，提示缺依赖使用pip3 install <包名>安装
+./upgrade.py status build/gd32f303cc_imu_to_dxl_slot_a.ipkg
+
+# 升级指令，使用自动识别串口
+./upgrade.py upgrade gd32f303cc_imu_to_dxl_slot_a.ipkg
+
+# 升级指令，指定一些参数（高级，与上面二选一）
+./upgrade.py upgrade gd32f303cc_imu_to_dxl_slot_a.ipkg --port /dev/ttyS2 --baud 1000000 --protocol auto --yes
+
+# 如果提示slot_a占用，更换上面文件名为slot_b，目前脚本还不是十分智能
+
+# 再检查升级后节点版本，版本号一致就是升级成功
+./upgrade.py status
+```
+
 ## 其他说明
  - 项目主要使用了中国国内易于采购的飞特1910舵机，同时兼容原版XL330
  - 本项目在Linux平台开发，不能保证其他平台兼容性
