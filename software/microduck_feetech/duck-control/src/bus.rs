@@ -175,16 +175,28 @@ impl StaleImuTracker {
     }
 }
 
-/// The byte pipe under the framing, narrowed to the three operations the bus uses.
+/// The byte pipe under the framing, narrowed to the two operations the bus uses.
 ///
 /// A trait rather than `Box<dyn SerialPort>` directly so a scripted fake can stand in for the
 /// port in tests: the failures worth pinning here — a servo that never answers, a burst that
 /// arrives out of order — otherwise need broken hardware on a bench. `Send` because the
 /// control loop is moved onto its own thread by `robotd`.
+///
+/// **Deliberately no `flush`.** `serialport`'s `flush` is `tcdrain`, and on this board that
+/// costs a fixed **~12 ms** — measured on the Radxa Zero 3W's `ttyS2` (2026-10-02, 30 reps per
+/// shape) and independent of both frame length and whether anything answers: 8 bytes 12.08 ms,
+/// 9 bytes 10.82 ms, 24 bytes 11.23 ms with sixteen devices replying and 12.69 ms with none,
+/// 56 bytes 12.69 ms. Eight bytes is 80 µs of wire time at 1 Mbps, so the wait is the driver
+/// reporting a drained transmitter, not the bus. Two transactions a tick spent ~25 ms of a
+/// 20 ms period on it — the loop could not exceed ~41 Hz and reported 36.3 — while the replies
+/// it was waiting for were arriving in ~1 ms and simply sat in the input buffer until it
+/// looked. The read timeouts are what bound a transaction, and both are already far past the
+/// moment the frame is on the wire: [`BURST_IDLE`] ends a burst, [`READ_TIMEOUT`] bounds an
+/// addressed command. The reference implementation (`firmware/v1/host/bus.py`) and the
+/// `rustypot`-based upstream bus both write and then read, and neither drains.
 trait Transport: Send {
     fn write_all(&mut self, bytes: &[u8]) -> std::io::Result<()>;
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize>;
-    fn flush(&mut self) -> std::io::Result<()>;
 }
 
 /// The real port, wrapped so it satisfies [`Transport`] without a second `impl` block on
@@ -198,10 +210,6 @@ impl Transport for SerialTransport {
 
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         self.0.read(buf)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.0.flush()
     }
 }
 
@@ -505,9 +513,6 @@ impl FeetechIo {
         self.port
             .write_all(request)
             .map_err(|e| IoError::Bus(format!("write to {id}: {e}")))?;
-        self.port
-            .flush()
-            .map_err(|e| IoError::Bus(format!("flush for {id}: {e}")))?;
 
         // The port is configured with the burst's short idle timeout, but one addressed command
         // is not a burst: a single device answers it, and that device may be slow. Keep polling
@@ -557,9 +562,6 @@ impl FeetechIo {
         self.port
             .write_all(&request)
             .map_err(|e| IoError::Bus(format!("sync_read write: {e}")))?;
-        self.port
-            .flush()
-            .map_err(|e| IoError::Bus(format!("sync_read flush: {e}")))?;
 
         let mut blocks: Vec<Option<Vec<u8>>> = vec![None; ids.len()];
         // A nonzero status is a per-device answer, not the end of the burst: the id and its
@@ -674,9 +676,6 @@ impl FeetechIo {
         let request = feetech::instruction_no_addr(id, feetech::inst::PING);
         self.port
             .write_all(&request)
-            .map_err(|e| IoError::Bus(format!("ping {id}: {e}")))?;
-        self.port
-            .flush()
             .map_err(|e| IoError::Bus(format!("ping {id}: {e}")))?;
 
         let deadline = Instant::now() + READ_TIMEOUT;
@@ -976,9 +975,6 @@ impl RobotIo for FeetechIo {
         self.port
             .write_all(&frame)
             .map_err(|e| IoError::Bus(format!("sync_write goal positions: {e}")))?;
-        self.port
-            .flush()
-            .map_err(|e| IoError::Bus(format!("sync_write goal positions: {e}")))?;
         Ok(())
     }
 
@@ -1019,12 +1015,11 @@ impl RobotIo for FeetechIo {
         self.write_register(id, feetech::reg::TORQUE_ENABLE, 0)?;
 
         let frame = feetech::instruction_no_addr(id, REBOOT_INST);
+        // Written and done: `REBOOT` answers nothing, so there is no status packet to collect
+        // and nothing to wait for on the wire either. The caller's [`REBOOT_SETTLE`] sleep is
+        // what gives the servo time to come back.
         self.port
             .write_all(&frame)
-            .map_err(|e| IoError::Bus(format!("reboot {id}: {e}")))?;
-        // The vendor's `Reboot()` flushes and returns without reading: nothing comes back.
-        self.port
-            .flush()
             .map_err(|e| IoError::Bus(format!("reboot {id}: {e}")))?;
         Ok(())
     }
@@ -1322,10 +1317,6 @@ mod tests {
             self.replies.drain(..n);
             Ok(n)
         }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
     }
 
     /// A servo that never answers must not cost the tick the old 30 ms serial wait: the burst
@@ -1550,10 +1541,6 @@ mod tests {
             buf[..n].copy_from_slice(&state.replies[..n]);
             state.replies.drain(..n);
             Ok(n)
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
         }
     }
 
@@ -1817,10 +1804,6 @@ mod tests {
             buf[..n].copy_from_slice(&s.replies[..n]);
             s.replies.drain(..n);
             Ok(n)
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
         }
     }
 
