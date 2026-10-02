@@ -314,7 +314,7 @@ above the mouth and a mean over fifteen servos hides the one approaching its ove
 shutdown.
 
 A silent servo does not produce a short answer: the burst ends when the line has been idle for
-2 ms or when every requested id has answered, and an id that never does is named in the one error
+4 ms or when every requested id has answered, and an id that never does is named in the one error
 the transaction returns. So both reads are all-or-nothing, and the caller keeps its previous
 sample rather than treating one miss as news.
 

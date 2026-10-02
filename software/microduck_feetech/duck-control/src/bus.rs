@@ -58,14 +58,31 @@ const SERVO_BLOCK_LEN: usize = READ_LEN as usize;
 ///
 /// One reply slot on this bus measures about 295 µs — that is the time a device occupies the
 /// wire with its status block, and it is spent even when the addressed device is absent and
-/// sends nothing. Two milliseconds is therefore roughly six reply slots of margin: comfortably
-/// past the last real reply, yet short enough that one missing servo cannot overrun the 20 ms
-/// control period the way the old 30 ms wait did.
+/// sends nothing.
+///
+/// **Four milliseconds, and measured rather than derived.** On the robot (Radxa Zero 3W,
+/// `ttyS2`, the full sixteen-device read, 9000 ticks at 50 Hz with the goal `sync_write` in
+/// front of each one, 2026-10-02) the silence between consecutive replies runs 0.27 ms median,
+/// 0.57 ms at p99, and **1.94 ms worst over 135 000 gaps**; a whole burst is in by ~4.9 ms.
+///
+/// Two milliseconds used to hold that, and on this sample it still did — but only just: the
+/// worst gap sat at 97 % of the budget, and replaying the same arrival timelines against a
+/// 1 ms rule already loses replies on 26 of those 9000 ticks. A serial tail that close to its
+/// threshold turns any margin the servo, its connector or the temperature gives up into exactly
+/// the isolated `id(s) … missing` drop the loop counts as a failed tick and coasts over. Four
+/// milliseconds is about twice the worst silence ever measured, which is the margin this
+/// constant exists to buy.
+///
+/// It is still small enough for the case the small value was chosen for: a genuinely absent
+/// servo costs one settled interval, so a missing joint holds the burst for 4 ms of a 20 ms
+/// period rather than the 30 ms the pre-FeeTech wait did. **Nothing else pays it** — a burst
+/// ends the moment every requested id has been heard, so a healthy tick never waits this
+/// interval out at all.
 ///
 /// It is also the serial port's own read timeout, which is what makes an empty read and "the
 /// burst is over" the same event: [`FeetechIo::pump`] cannot report silence before the line has
 /// been idle this long, so the burst loop needs no second, separate idle timer.
-const BURST_IDLE: Duration = Duration::from_millis(2);
+const BURST_IDLE: Duration = Duration::from_millis(4);
 
 /// Budget for one *addressed* command and its acknowledgement.
 ///
