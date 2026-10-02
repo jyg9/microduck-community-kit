@@ -40,7 +40,12 @@ void dbg_hex(uint8_t level, const char *tag, const uint8_t *data, uint16_t len);
 #define DBG_ERROR(...)  ((void)0)
 #define DBG_INFO(...)   ((void)0)
 #define DBG_TRACE(...)  ((void)0)
-#define dbg_hex(...)    ((void)0)
+/* No `dbg_hex` macro here. It is a real function with its own `#if DBG_ENABLE`
+   body in dbg.c, so a function-like macro of the same name rewrites that very
+   definition and `DBG_ENABLE=0` does not compile:
+       src/dbg.c:67: error: expected identifier or '(' before 'void'
+   The body guard already removes the code, and there are no call sites — the
+   three variadic macros above are the interface. */
 #endif
 
 #endif /* DBG_H */
