@@ -11,7 +11,7 @@
 - **banana_pcb**：<a href="hardware/banana_pcb">电池上方的转接小板</a>
 - **dxl_hub**：<a href="hardware/dxl_hub">鸭鸭身体中的集线器板</a>
 - **飞特舵机调试软件**：<a href="software/hls_servo_debugger">飞特舵机调试软件</a>
-- **microduck_feetech**：<a href="software/microduck_feetech">官方机器人软件（robotd 等）的飞特舵机适配版</a>——基于官方 `microduck` 仓库当前 `main`（`f0d934e`）打上飞特总线补丁的完整源码，可直接编译运行；补丁与逐文件说明见 <a href="firmware/v1/patches/microduck_feetech_patch.md">firmware/v1/patches</a>
+- **microduck_feetech**：<a href="software/microduck_feetech">官方机器人软件（robotd 等）的飞特舵机适配版</a>——基于官方 `microduck` 仓库当前（`2026年10月2日`）打上飞特总线补丁的完整源码，可直接编译运行；
 
 接线图：
 ```text
@@ -39,8 +39,8 @@ git clone --recurse-submodules https://github.com/jyg9/microduck-community-kit.g
 ```
 
 固件升级方法：
-- 1、SFTP复制本项目<a href="firmware/v1/host">主机工具</a>下的`upgrade.py`、`package.py`、`bus.py`到目标电脑。目标电脑可也是鸭子后台，也可以是电脑接USB转舵机TTL
-- 2、从项目Releases下载编译好的固件，两个文件`gd32f303cc_imu_to_dxl_slot_a.ipkg`和`gd32f303cc_imu_to_dxl_slot_b.ipkg`，同样复制到目标电脑
+- 1、SFTP复制本项目<a href="firmware/v1/host">主机工具</a>下的`upgrade.py`、`package.py`、`bus.py`到目标电脑。目标电脑可也是鸭子后台，也可以是电脑接USB转舵机TTL。
+- 2、从项目Releases下载编译好的固件，两个文件`gd32f303cc_imu_to_dxl_slot_a.ipkg`和`gd32f303cc_imu_to_dxl_slot_b.ipkg`，同样复制到目标电脑。
 - 3、执行升级指令：
 ```bash
 # 看目前节点版本号等信息，需不需要升级，提示缺依赖使用pip3 install <包名>安装
