@@ -617,10 +617,49 @@ phase_two() {
     fi
     sh "$tmp"
 
-    apply_asked_ref
+    # Naming first: it needs nothing from the branch build, and a branch apply that fails is fatal
+    # — which, in the other order, cost a board the one thing its operator typed.
     name_the_robot
+    apply_asked_ref
 
     finish
+}
+
+# Wait for the restarts an apply deferred to land: the transient `systemd-run` timers `updaterd`
+# schedules for itself and `btd` once its reply is on the wire (`RESTART_AFTER_REPLYING` in
+# `updater/src/engine.rs`). An *active* timer is one that is pending or whose restart is still
+# running, so an empty list means both have happened.
+#
+# Matched by what they run rather than by name, since systemd names them `run-r<random>`. Not
+# fatal on a timeout: a stuck timer is worth a warning, and the apply that follows says whether
+# updaterd is usable.
+wait_for_deferred_restarts() {
+    waited=0
+    while systemctl list-units --type=timer --state=active --plain --no-legend 'run-*.timer' \
+            2>/dev/null | grep -q 'systemctl restart'; do
+        if [ "$waited" -ge 60 ]; then
+            warn "a deferred restart is still pending after 60s; carrying on:
+$(systemctl list-units --type=timer --state=active --plain --no-legend 'run-*.timer' 2>/dev/null)"
+            return 0
+        fi
+        waited=$((waited + 1))
+        sleep 1
+    done
+}
+
+# Wait for `updaterd` to answer. `update status` answering means it is up and serving, which is
+# the earliest point at which anything can be asked of it.
+wait_for_updaterd() {
+    waited=0
+    until robotctl update status >/dev/null 2>&1; do
+        if [ "$waited" -ge 90 ]; then
+            die "updaterd did not answer within 90s. The board may be mid-rollback. Look at:
+    journalctl -u updaterd -b --no-pager
+    robotctl health"
+        fi
+        waited=$((waited + 2))
+        sleep 2
+    done
 }
 
 # Install the daemon that `--ref BRANCH` last built, when a branch was asked for.
@@ -644,6 +683,14 @@ apply_asked_ref() {
 
     say "installing the daemon that ${ASKED_REF} last built"
 
+    # `install.sh`'s bootstrap apply ends like every apply: `updaterd` and `btd` restarted by
+    # transient `systemd-run` timers "five seconds" later. Observed on a fresh board, that timer
+    # fired seventeen seconds later instead — four seconds into this apply, killing the updaterd
+    # performing it, so the branch build died at `Extracting` and the board stayed on stable.
+    # So let the restarts land first, then wait for updaterd to answer again.
+    wait_for_deferred_restarts
+    wait_for_updaterd
+
     # **The exit status is not the verdict, and cannot be.** The release`s `hooks/postinstall`
     # restarts `updaterd`, which is the process streaming progress back — so a *successful* apply
     # ends with `updaterd closed the connection` and a non-zero exit, every time. Treating that as
@@ -653,23 +700,11 @@ apply_asked_ref() {
   drops the connection carrying the reply. What is actually running is the verdict, below."
     fi
 
-    # Wait for the restarted daemons before reading anything, or this samples mid-swap. `update
-    # status` answering means `updaterd` is back and serving, which is the earliest point at which
-    # the question can be asked at all.
-    waited=0
-    while [ "$waited" -lt 90 ]; do
-        if robotctl update status >/dev/null 2>&1; then
-            break
-        fi
-        waited=$((waited + 2))
-        sleep 2
-    done
-    if [ "$waited" -ge 90 ]; then
-        die "updaterd did not come back within 90s of installing the ${ASKED_REF} build.
-  The board may be mid-rollback. Look at:
-    journalctl -u updaterd -b --no-pager
-    robotctl health"
-    fi
+    # Wait for the restarted daemons before reading anything, or this samples mid-swap. The same
+    # two waits as above, for this apply's own deferred restarts: `update status` answering
+    # alone can be the *old* updaterd, in the five seconds before its timer fires.
+    wait_for_deferred_restarts
+    wait_for_updaterd
 
     # And then a moment more: the health gate runs *after* the swap, so a build that fails it is
     # rolled back seconds later. Reading `current` the instant updaterd answers can catch the new

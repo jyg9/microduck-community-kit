@@ -761,6 +761,15 @@ impl FeetechIo {
             self.write_eeprom(id, feetech::reg::BAUD_RATE, EXPECTED_BAUD_CODE)?;
             fixed += 1;
         }
+
+        // **No `homing_offset` check here, deliberately.** Upstream `main` (4656690) asserts a
+        // per-servo zero offset from this routine and corrects it: -512 on the two knees, 0
+        // everywhere else. Those are **XL330** values, written by `microduck_runtime`'s
+        // `setup_motor_rpi.py`, and the HLS equivalent — `OFS_L`, address 31, defined in
+        // `crate::feetech::reg` and unused — has never been measured on a C001. This routine
+        // *writes* whatever it finds wrong, so an unmeasured expectation would silently re-zero
+        // every servo on the robot. It belongs with the joint-zero and assembly-direction item,
+        // not before it: see `FORK.md` and the patch note's open items.
         Ok(fixed)
     }
 

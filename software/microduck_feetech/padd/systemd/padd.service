@@ -23,8 +23,12 @@ Documentation=file:///opt/robot/daemon/current/docs/architecture.md
 # `After`, not `Requires`: robotd is where the intents go, so starting before it is pointless — but
 # a robotd that is down must not keep this unit from being started. If the socket is not there yet
 # `padd` exits and systemd retries in five seconds, which is how it catches up on a slow boot.
+#
+# No `Wants=robotd.service` either. robotd is started at boot by its own `WantedBy=`, so all
+# `Wants=` added was to start robotd again every time this unit started — and with
+# `Restart=always`, a `systemctl stop robotd` came undone five seconds later whenever a pad was
+# connected, because only then does `padd` write to the dead socket and exit. Stopped means stopped.
 After=robotd.service local-fs.target
-Wants=robotd.service
 
 # The pad arrives over Bluetooth, and on this board hci0 does not exist until roughly 73 seconds
 # after power-on. Ordering after bluetooth.service is nowhere near sufficient for that and is not

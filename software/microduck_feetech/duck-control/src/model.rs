@@ -114,6 +114,13 @@ pub const FACTORY_ID: u8 = 1;
 /// wraps these writes in an unlock/relock pair (`FeetechIo::write_eeprom`).
 pub const EXPECTED_BAUD_CODE: u8 = 0;
 
+// Upstream `main` (4656690) carries a per-servo zero offset here — `homing_offset()`, -512 on
+// the two knees and 0 elsewhere — asserted by the register check. **This directory deliberately
+// does not.** Those are XL330 values from `microduck_runtime`'s `setup_motor_rpi.py`; the HLS
+// equivalent is `OFS_L` (address 31, see `crate::feetech::reg`) and the C001's values have never
+// been measured. The check writes what it finds wrong, so guessing would silently re-zero every
+// servo — the same open item as the joint zeros and assembly direction. See `FORK.md`.
+
 /// Index of a joint by name. Linear scan over 15 entries, used at startup and in tests.
 pub fn joint_index(name: &str) -> Option<usize> {
     JOINT_NAMES.iter().position(|n| *n == name)
@@ -207,6 +214,7 @@ mod tests {
         assert_ne!(EXPECTED_BAUD_CODE, 3);
         assert!(EXPECTED_BAUD_CODE <= 7, "the HLS baud register only encodes 0..7");
     }
+
 
     /// `MOUTH_INDEX` is used to skip a slot when mapping 14 policy actions onto 15 joints.
     /// Pointing it at the wrong joint would shift every action after it by one.

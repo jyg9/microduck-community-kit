@@ -20,8 +20,10 @@ Documentation=file:///opt/robot/daemon/current/docs/design/remote-webrtc.md
 # go, so starting first is pointless — but any of them being down must not keep this unit from
 # starting. A peer that connects while robotd is restarting gets "robotd is not answering", which
 # is the honest answer and better than mediad refusing to run.
+#
+# No `Wants=robotd.service`, for padd's reason: it only made every start or restart of this unit
+# start robotd again, undoing a `systemctl stop robotd`.
 After=robotd.service configd.service updaterd.service local-fs.target
-Wants=robotd.service
 
 [Service]
 Type=exec

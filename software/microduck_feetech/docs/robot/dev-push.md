@@ -55,7 +55,7 @@ asked for over Bluetooth — the robot's own `net.status` answers with it — an
 a push that cannot reach the cached address goes back to the radio. That is what makes a new DHCP
 lease, a reflash or a different network cost nothing to follow.
 
-The ssh user is `radxa`. If yours is not:
+The ssh user is `microduck`. If yours is not:
 
 ```bash
 export DUCK_BOARD_USER=pierre
@@ -64,11 +64,11 @@ export DUCK_BOARD_USER=pierre
 An address still works, and skips the radio entirely:
 
 ```bash
-scripts/dev-push.sh radxa@192.168.1.42
+scripts/dev-push.sh microduck@192.168.1.42
 ```
 
 ```bash
-export DUCK_BOARD=radxa@192.168.1.42
+export DUCK_BOARD=microduck@192.168.1.42
 ```
 
 It cross-compiles the workspace, packages the same artifact a release does, signs it with the dev
@@ -79,9 +79,9 @@ key, copies it to `~/duck-sideload` on the board, and applies it there through
 ==> building 0.5.1-dev.local.1763400000.g7fc1444 for the board (zigbuild)
 ==> packaging
 ==> signing with /Users/you/.duck-keys/team.dev.key
-==> copying to radxa@192.168.1.42:/home/radxa/duck-sideload
-==> applying on radxa@192.168.1.42
-==> 0.5.1-dev.local.1763400000.g7fc1444 is live on radxa@192.168.1.42
+==> copying to microduck@192.168.1.42:/home/microduck/duck-sideload
+==> applying on microduck@192.168.1.42
+==> 0.5.1-dev.local.1763400000.g7fc1444 is live on microduck@192.168.1.42
 ==> checking every daemon is running it
     current -> 0.5.1-dev.local.1763400000.g7fc1444
     [ok] robotd
@@ -91,7 +91,7 @@ key, copies it to `~/duck-sideload` on the board, and applies it there through
     [ok] btd
     [ok] mediad
     [ok] tofd
-==> every daemon on radxa@192.168.1.42 is running 0.5.1-dev.local.1763400000.g7fc1444
+==> every daemon on microduck@192.168.1.42 is running 0.5.1-dev.local.1763400000.g7fc1444
 ```
 
 `updaterd` and `btd` restart five seconds after the apply replies, so those two lines take a moment
@@ -124,21 +124,21 @@ sudo robotctl update rollback daemon
 From a second terminal, before the push, so the restart shows up in it:
 
 ```bash
-ssh radxa@192.168.1.42 'journalctl -f -u robotd -u configd -u btd -u padd'
+ssh microduck@192.168.1.42 'journalctl -f -u robotd -u configd -u btd -u padd'
 ```
 
 `-u updaterd` on its own is the update itself — each phase, the health gate, and the restarts it
 schedules:
 
 ```bash
-ssh radxa@192.168.1.42 'journalctl -f -u updaterd'
+ssh microduck@192.168.1.42 'journalctl -f -u updaterd'
 ```
 
 A panic in a daemon lands there with a full backtrace: nothing is stripped from these binaries, so
 the frames have names.
 
 ```bash
-ssh radxa@192.168.1.42 robotctl health
+ssh microduck@192.168.1.42 robotctl health
 ```
 
 Whether the control loop is up, and which release each daemon is running.
@@ -177,7 +177,7 @@ sudo systemctl daemon-reload && sudo systemctl restart robotd
 ## Verify without installing
 
 ```bash
-scripts/dev-push.sh --dry-run radxa@192.168.1.42
+scripts/dev-push.sh --dry-run microduck@192.168.1.42
 ```
 
 Builds, signs, copies, and then does everything the real apply does except the swap: signature,
@@ -188,7 +188,7 @@ it was running and no daemon restarts.
 ## Build in a container instead
 
 ```bash
-scripts/dev-push.sh --docker radxa@192.168.1.42
+scripts/dev-push.sh --docker microduck@192.168.1.42
 ```
 
 No zig, no `cargo-zigbuild`, and no board to copy libudev from. On an Apple Silicon Mac the
@@ -230,7 +230,7 @@ has an `updaterd` that cannot be asked to use it, and refuses the call rather th
 installing from its configured source instead. Deliver that release once the ungated way:
 
 ```bash
-scripts/dev-push.sh --bootstrap radxa@192.168.1.42
+scripts/dev-push.sh --bootstrap microduck@192.168.1.42
 ```
 
 That stops `robotd` and gives up the health gate for that one install. Every push after it is the
@@ -285,7 +285,7 @@ Nothing listed is a robot that is off, out of range, or already connected to a p
 address instead and the radio is not involved:
 
 ```bash
-scripts/dev-push.sh radxa@192.168.1.42
+scripts/dev-push.sh microduck@192.168.1.42
 ```
 
 **`<name> answered over Bluetooth but has no wifi address`** — it is up but not on a network, so
@@ -301,7 +301,7 @@ unhappy about is something else. A reflashed board is the usual one; see the hos
 **ssh refuses to connect after a reflash** — the board regenerated its host keys.
 
 ```bash
-./scripts/provision-board.sh radxa@192.168.1.42 --forget-host-key
+./scripts/provision-board.sh microduck@192.168.1.42 --forget-host-key
 ```
 
 **`the release is live but not everything is running it`** — the swap happened and the health gate
@@ -333,10 +333,10 @@ This should not have been necessary, so it is worth reading the journal for why 
 | | |
 |---|---|
 | `DUCK_ROBOT` | The robot, by name. Its address is found over Bluetooth and cached. |
-| `DUCK_BOARD_USER` | The ssh user on the board, for the name path. Default `radxa`. `duckctl ssh` and `duckctl scp` read it too. |
+| `DUCK_BOARD_USER` | The ssh user on the board, for the name path. Default `microduck`. `duckctl ssh` and `duckctl scp` read it too. |
 | `DUCK_PIN` | The robot's pairing PIN, if it is not the factory `000000`. Read by `duckctl`. |
 | `DUCK_BOARD_CACHE` | Where resolved addresses are cached. Default `~/.cache/duck/boards`. |
-| `DUCK_BOARD` | The board, by address, instead of an argument. `radxa@192.168.1.42`. |
+| `DUCK_BOARD` | The board, by address, instead of an argument. `microduck@192.168.1.42`. |
 | `DUCK_DEV_SECRET_KEY` | The dev signing key. Default `~/.duck-keys/team.dev.key`. |
 | `DUCK_SIDELOAD_DIR` | Where the artifact lands on the board. Default `~/duck-sideload` there. Never under `/tmp` or `/var/tmp`: `updaterd` has private copies of both and would read those. |
 | `DUCK_CROSS_SYSROOT` | The cached libudev copy. Default `~/.cache/duck-cross/aarch64`. |

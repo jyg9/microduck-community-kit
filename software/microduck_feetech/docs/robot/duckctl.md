@@ -67,7 +67,7 @@ it, along with the signal and both addresses.
 For the address on its own:
 
 ```bash
-ssh radxa@$(duckctl ip)
+ssh microduck@$(duckctl ip)
 ```
 
 `ip` prints the address and nothing else, so it substitutes. It reads the advertisement, so it
@@ -87,7 +87,7 @@ duckctl ssh -- sudo robotctl pad pair
 `ssh` finds the address the way `ip` does and then becomes `ssh`, so the prompts, the terminal and
 the exit status are ssh's own. The account is `--user`, else `DUCK_BOARD_USER` from the environment
 — the variable [`dev-push.sh`](dev-push.md) reads, so a laptop set up for pushing is set up for this
-— else `radxa`. Words after `--` run on the robot instead of opening a shell.
+— else `microduck`. Words after `--` run on the robot instead of opening a shell.
 
 Files go the same way:
 
@@ -341,7 +341,7 @@ Which matters after an update, when forty lines carry two different builds' outp
 There is no `-f`, no `--since` and no search. For those, ssh in:
 
 ```bash
-ssh radxa@$(duckctl --name <robot-name> ip)
+ssh microduck@$(duckctl --name <robot-name> ip)
 ```
 
 ```bash

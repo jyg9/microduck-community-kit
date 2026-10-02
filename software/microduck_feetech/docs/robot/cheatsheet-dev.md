@@ -106,7 +106,7 @@ ships. `../design/restart-order.md` is the full sequence, step by step.
 Skipping CI entirely: build on your machine and install over ssh, in about a minute.
 
 ```bash
-scripts/dev-push.sh radxa@<board>
+scripts/dev-push.sh microduck@<board>
 ```
 
 The result is an ordinary gated update, so the restart traps above still apply.
@@ -127,7 +127,7 @@ sudo systemctl stop padd
 Forward the socket and leave it open:
 
 ```bash
-ssh -L /tmp/robotd.sock:/run/robotd.sock radxa@192.168.1.42
+ssh -L /tmp/robotd.sock:/run/robotd.sock microduck@192.168.1.42
 ```
 
 Then from this clone, in another terminal:

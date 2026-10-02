@@ -255,7 +255,7 @@ Then, for a verdict over a window rather than a live picture, copy the measureme
 from a clone of this repo:
 
 ```bash
-scp scripts/pad-link-test.sh radxa@<board>:/tmp/
+scp scripts/pad-link-test.sh microduck@<board>:/tmp/
 ```
 
 What has already happened, out of `padd`'s journal — no pad needed, and it answers immediately:
@@ -291,7 +291,7 @@ pad firmware — and none of that is visible in `pad status`.
 Copy the report onto each board, from a clone of this repo:
 
 ```bash
-scp scripts/pad-stack-report.sh radxa@<board>:/tmp/
+scp scripts/pad-stack-report.sh microduck@<board>:/tmp/
 ```
 
 ```bash
@@ -307,11 +307,11 @@ it.
 To compare two boards, ask each for only the values that have to match:
 
 ```bash
-ssh radxa@<board-a> sudo sh /tmp/pad-stack-report.sh --fingerprint > /tmp/a.fp
+ssh microduck@<board-a> sudo sh /tmp/pad-stack-report.sh --fingerprint > /tmp/a.fp
 ```
 
 ```bash
-ssh radxa@<board-b> sudo sh /tmp/pad-stack-report.sh --fingerprint > /tmp/b.fp
+ssh microduck@<board-b> sudo sh /tmp/pad-stack-report.sh --fingerprint > /tmp/b.fp
 ```
 
 ```bash

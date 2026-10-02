@@ -125,7 +125,7 @@ already parses it — `Address::At`, `Unassigned`, `Unsaid`, three answers rathe
 
 ### 2.1 `duckctl ip`
 
-The robot's address on stdout and nothing else, so `ssh radxa@$(duckctl ip)` works — the split
+The robot's address on stdout and nothing else, so `ssh microduck@$(duckctl ip)` works — the split
 the tool already keeps, diagnostics on stderr and data on stdout.
 
 **This is not a new idea in this repo; it is one that has already been written badly once.**

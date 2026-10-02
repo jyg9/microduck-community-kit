@@ -283,7 +283,12 @@ saying so:
   torque once the supply passes the servo's `Max Voltage Limit`, which nothing here writes and
   which therefore stays at its default 7.0 V. A charged 2S pack sits above that, so the clear
   bit is what lets this bus run the pack's range across a servo rated to 6.0 V. Read as
-  "latches on input-voltage faults" it says the opposite of what it does.
+  "latches on input-voltage faults" it says the opposite of what it does. Upstream `main` asserts
+  `homing_offset` alongside them — −512 on the knees (13, 23), 0 elsewhere, the values from the
+  runtime's `setup_motor_rpi.py` flashing rig — which is what an XL330 needs and what every pose
+  and policy assume. **The FeeTech port does not**: those are XL330 values, the HLS equivalent
+  (`OFS_L`, 31) has never been measured on a C001, and the check writes whatever it finds wrong.
+  See `FORK.md`.
 - **A swapped-in servo is adopted, not configured by hand.** A new XL330 answers as ID 1 at
   57 600 baud, and neither is used on this bus. So before the register check, `open_bus` pings
   the fifteen expected IDs; if *exactly one* is silent, it looks for ID 1 — first at 1 Mbps,

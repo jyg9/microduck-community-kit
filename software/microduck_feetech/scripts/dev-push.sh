@@ -79,7 +79,7 @@ done
 # An address moves. A reflash, a router reboot or a different network hands the board a new
 # lease, and mDNS on this image is unreliable enough that a `.local` name is not the answer
 # either (`provision-board.sh` says the same). So the address is the one thing about a board
-# nobody can keep in a shell profile: `DUCK_BOARD=radxa@192.168.1.42` goes stale, and the way
+# nobody can keep in a shell profile: `DUCK_BOARD=microduck@192.168.1.42` goes stale, and the way
 # that reads is a push that hangs until ssh times out.
 #
 # A robot's *name* does not move. `duckctl` finds it over BLE by that name and `net.status`
@@ -89,7 +89,7 @@ done
 # Cached, and re-resolved only when ssh cannot reach the cached address, because BLE discovery
 # costs ten to twenty seconds and this script exists to be quick. The steady state is one ssh
 # probe; the reflashed-board case pays one scan and is quick again after it.
-BOARD_USER="${DUCK_BOARD_USER:-radxa}"
+BOARD_USER="${DUCK_BOARD_USER:-microduck}"
 CACHE_DIR="${DUCK_BOARD_CACHE:-$HOME/.cache/duck/boards}"
 
 # The installed client if there is one, this clone's otherwise. `cargo install --path duckctl` is
@@ -175,7 +175,8 @@ print((r.get("result") or {}).get("ip4") or "")')" || return 1
 
 # The command line beats the environment, and an address beats a name: an address needs no radio.
 # `DUCK_ROBOT` is the same variable `duckctl` defaults `--name` to, so one exported name serves
-# both tools — and empty means unset in both, so `DUCK_ROBOT= scripts/dev-push.sh radxa@…` works.
+# both tools — and empty means unset in both, so
+# `DUCK_ROBOT= scripts/dev-push.sh microduck@…` works.
 # `--name` here is `duckctl`'s sense of it: which robot to talk to. `provision-board.sh --name`
 # means the opposite way round — the name to *give* a board — because provisioning is the one place
 # a name is assigned rather than used to find something.
@@ -196,7 +197,7 @@ fi
 if [ -z "$BOARD" ]; then
     echo "no board: name one, or give its address" >&2
     echo "  scripts/dev-push.sh --name duck-c51b        # found over Bluetooth" >&2
-    echo "  scripts/dev-push.sh radxa@192.168.1.42" >&2
+    echo "  scripts/dev-push.sh microduck@192.168.1.42" >&2
     echo "or set DUCK_ROBOT or DUCK_BOARD once per shell" >&2
     exit 2
 fi

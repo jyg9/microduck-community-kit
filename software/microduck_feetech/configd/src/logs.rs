@@ -7,8 +7,9 @@
 //!
 //! **`configd` reads it because reading the journal needs privilege**, the same reason
 //! [`units`](crate::units) is here: it runs as root (see `systemd/configd.service`), and
-//! `robotctl` does not. On the robot itself nobody should use this — `journalctl` is right there,
-//! with `-g`, `--since` and a pager. This is for the transports that have none of that.
+//! `robotctl` does not. `robotctl logs` asks for the same tail over the local socket, so an operator
+//! with a shell gets it without `sudo`. For anything more — `-g`, `--since`, `-f` — they use
+//! `journalctl`; this call is a tail and nothing else.
 //!
 //! ## Why it shells out to `journalctl`
 //!

@@ -24,7 +24,7 @@ first boot and is reachable over ssh straight away.
 Then add your ssh key, so provisioning can reconnect after it reboots the board:
 
 ```bash
-ssh-copy-id radxa@192.168.1.42
+ssh-copy-id microduck@192.168.1.42
 ```
 
 ## What you need
@@ -50,7 +50,7 @@ export DUCK_TOKEN=github_pat_replace_with_your_token
 ```
 
 ```bash
-./scripts/provision-board.sh --pause-btd-on-pair --name <MY_COOL_ROBOT_NAME> radxa@192.168.1.42
+./scripts/provision-board.sh --pause-btd-on-pair --name <MY_COOL_ROBOT_NAME> microduck@192.168.1.42
 ```
 
 That sends your dev key, starts provisioning, waits out the reboot, streams the log, and ends on
@@ -113,7 +113,7 @@ resumes at boot, so the board finishes whether or not you are still watching. Ct
 nothing, and you can pick the log back up:
 
 ```bash
-ssh -t radxa@192.168.1.42 'sudo tail -f /var/lib/robot/provision.log'
+ssh -t microduck@192.168.1.42 'sudo tail -f /var/lib/robot/provision.log'
 ```
 
 `--ref BRANCH` provisions from a branch: its scripts run the bring-up, and its build of the daemon
@@ -124,7 +124,8 @@ branch.
 Provisioning **fails** if that build cannot be installed, or if it is installed and then rolled back
 by the health gate. A dev board quietly running the stable release when a branch was asked for is the
 worst failure to debug: everything looks installed and the code under test is not there. Give CI its
-minute or two before provisioning, and check with `gh run list --branch BRANCH` if it stops.
+minute or two before provisioning, and check with `gh run list --branch BRANCH` if it stops. `--name`
+is applied before the branch build, so a board that fails here still has its name.
 
 Other useful flags: `--name Ducky` names the robot instead of leaving it the `duck-7f3a` it derives
 from its own serial (`robotctl system set-name` changes it later, so this only saves a command),
@@ -161,7 +162,7 @@ different one. `StrictHostKeyChecking=accept-new` does not cover it: the host is
 is. The raw ssh error for this is a wall of text about a possible attack.
 
 ```bash
-./scripts/provision-board.sh radxa@192.168.1.42 --forget-host-key
+./scripts/provision-board.sh microduck@192.168.1.42 --forget-host-key
 ```
 
 This matters more than it sounds, because DHCP leases get reused — the address that was one

@@ -351,6 +351,28 @@ enum Namespace {
         json: bool,
     },
 
+    /// The tail of one daemon's journal, read by `configd` — so no `sudo` and no
+    /// `systemd-journal` group.
+    ///
+    /// The same call `duckctl logs` makes over Bluetooth, and the same fixed list of units. For
+    /// following or searching, `journalctl` is the tool; this is the short answer to "what did it
+    /// say".
+    Logs {
+        /// `robotd`, `btd`, `configd`, `updaterd`, `padd`, `mediad`, `tofd`, `bluetooth` or
+        /// `NetworkManager`. The `.service` suffix is optional.
+        #[arg(value_name = "SERVICE")]
+        service: String,
+        /// How many lines from the end. `configd` caps a reply at 500 lines and 48 KiB, and says
+        /// when it dropped older lines to fit.
+        #[arg(long, short = 'n', default_value_t = 100)]
+        lines: usize,
+        /// Which boot: `0` is this one, `-1` the one before it.
+        #[arg(long, short = 'b', default_value_t = 0, allow_hyphen_values = true)]
+        boot: i32,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Print a shell completion script on stdout.
     ///
     /// Generated from this binary's own command tree, so the completions a robot offers
@@ -2918,6 +2940,61 @@ fn render_account(status: &proto::AccountStatusResult) -> String {
     out
 }
 
+/// `robotctl logs` — a journal tail from `configd`'s `system.logs`.
+///
+/// The lines go to stdout and everything about them to stderr, so `robotctl logs robotd | grep
+/// panic` sees only what the daemon logged.
+fn run_logs(
+    socket: &Path,
+    service: String,
+    lines: usize,
+    boot: i32,
+    json: bool,
+) -> Result<(), Failure> {
+    let mut client = Client::connect_to("configd", socket)?;
+    client.hello()?;
+
+    let call = proto::Call::SystemLogs(proto::LogsParams {
+        unit: service,
+        lines,
+        boot,
+    });
+    let result = result_of(client.call(&call)?)?;
+    if json {
+        println!("{}", compact(&result));
+        return Ok(());
+    }
+
+    let tail: proto::LogsResult = decode(&result)?;
+    for line in &tail.lines {
+        println!("{line}");
+    }
+    if let Some(note) = logs_note(&tail, boot) {
+        eprintln!("{note}");
+    }
+    Ok(())
+}
+
+/// What a tail cannot say about itself: that it is empty, or that it is not all that was asked for.
+fn logs_note(tail: &proto::LogsResult, boot: i32) -> Option<String> {
+    let unit = &tail.unit;
+    if tail.lines.is_empty() {
+        // A daemon that has not run this boot is a real answer, and a different one from a daemon
+        // that is running and silent — `systemctl status` tells them apart.
+        return Some(format!(
+            "no lines for {unit} in boot {boot} — it may not have run then. \
+             `systemctl status {unit}` says whether it is running now."
+        ));
+    }
+    if tail.truncated {
+        return Some(format!(
+            "note: older lines were dropped to fit one reply. For more, \
+             `journalctl -u {unit} --boot={boot}`."
+        ));
+    }
+    None
+}
+
 /// Ask `configd` one question and print the answer.
 ///
 /// Every one of these is a single call with no progress stream, so they share one shape:
@@ -4959,6 +5036,14 @@ fn run(cli: Cli) -> Result<(), Failure> {
             );
             return Ok(());
         }
+        Namespace::Logs {
+            service,
+            lines,
+            boot,
+            json,
+        } => {
+            return run_logs(&cli.config_socket, service, lines, boot, json);
+        }
         Namespace::Net { command } => {
             return run_net(&cli.config_socket, command);
         }
@@ -5272,6 +5357,56 @@ fn compact(value: &impl serde::Serialize) -> String {
 }
 #[cfg(test)]
 mod tests {
+
+    // ── robotctl logs ────────────────────────────────────────────────────
+
+    #[test]
+    fn the_previous_boot_parses_as_a_negative_offset() {
+        let cli = Cli::try_parse_from(["robotctl", "logs", "robotd", "-b", "-1", "-n", "20"])
+            .expect("`logs robotd -b -1` must parse");
+        let Namespace::Logs {
+            service,
+            lines,
+            boot,
+            json,
+        } = cli.namespace
+        else {
+            panic!("expected logs, got {:?}", cli.namespace);
+        };
+        assert_eq!(
+            (service.as_str(), lines, boot, json),
+            ("robotd", 20, -1, false)
+        );
+    }
+
+    fn tail(lines: &[&str], truncated: bool) -> proto::LogsResult {
+        proto::LogsResult {
+            unit: "robotd.service".to_owned(),
+            lines: lines.iter().map(|l| (*l).to_owned()).collect(),
+            truncated,
+        }
+    }
+
+    #[test]
+    fn a_complete_tail_has_nothing_to_add() {
+        assert_eq!(logs_note(&tail(&["robotd[42]: up"], false), 0), None);
+    }
+
+    #[test]
+    fn an_empty_tail_says_so_rather_than_printing_nothing() {
+        let note = logs_note(&tail(&[], false), -1).expect("an empty tail is explained");
+        assert!(note.contains("boot -1"), "{note}");
+        assert!(note.contains("systemctl status robotd.service"), "{note}");
+    }
+
+    #[test]
+    fn a_truncated_tail_points_at_the_whole_journal() {
+        let note = logs_note(&tail(&["robotd[42]: up"], true), 0).expect("truncation is noted");
+        assert!(
+            note.contains("journalctl -u robotd.service --boot=0"),
+            "{note}"
+        );
+    }
 
     // ── robotctl policy ──────────────────────────────────────────────────
     //

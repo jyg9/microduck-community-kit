@@ -420,8 +420,8 @@ fn choose<T>(found: Vec<(T, String)>, target: &Target) -> Result<(T, String), St
 /// Deliver a resolved address the way the command asked for it.
 ///
 /// **`ip` prints the address and nothing else**, because the tool's split is diagnostics on stderr
-/// and data on stdout: `ssh radxa@$(duckctl ip)` only works if that is the whole of what stdout
-/// carries. Every note this command emits goes to stderr for the same reason.
+/// and data on stdout: `ssh microduck@$(duckctl ip)` only works if that is the whole of what
+/// stdout carries. Every note this command emits goes to stderr for the same reason.
 fn deliver(command: &Command, address: &str) -> Result<(), Box<dyn std::error::Error>> {
     match command {
         Command::Ip => {
@@ -457,15 +457,15 @@ fn deliver(command: &Command, address: &str) -> Result<(), Box<dyn std::error::E
 }
 
 /// Which account `ssh` and `scp` log into: the flag, else a non-empty `DUCK_BOARD_USER`, else
-/// `radxa`.
+/// `microduck`.
 ///
 /// Empty is unset — `DUCK_BOARD_USER= duckctl ssh` reads as "not set", the same rule `DUCK_ROBOT`
 /// follows, because a variable emptied to switch it off must not become an ssh login of `@host`.
-/// `radxa` is the image's account and `dev-push.sh`'s default for the same variable.
+/// `microduck` is the image's account and `dev-push.sh`'s default for the same variable.
 fn ssh_user(flag: Option<&str>, env: Option<String>) -> String {
     flag.map(str::to_owned)
         .or_else(|| env.filter(|user| !user.trim().is_empty()))
-        .unwrap_or_else(|| "radxa".to_owned())
+        .unwrap_or_else(|| "microduck".to_owned())
 }
 
 /// `ssh`'s arguments: `user@address`, then whatever is to run there.
@@ -896,7 +896,7 @@ enum Command {
     Scan,
     /// The robot's IPv4 address on stdout, and nothing else.
     ///
-    /// `ssh radxa@$(duckctl ip)`. Read from the advertisement `btd` already broadcasts, so no
+    /// `ssh microduck@$(duckctl ip)`. Read from the advertisement `btd` already broadcasts, so no
     /// connection is made, no bond is needed and no PIN can be wrong — and it costs about a second
     /// rather than the tens `wifi status` does. A robot that is bonded to this machine and has
     /// stopped advertising the service to it is asked over BLE instead, which is slower and always
@@ -911,9 +911,9 @@ enum Command {
     ///
     /// The user is `--user`, else `DUCK_BOARD_USER` from the environment — the same variable
     /// `scripts/dev-push.sh` reads, so a laptop set up for pushing is set up for this — else
-    /// `radxa`, the image's default account.
+    /// `microduck`, the image's default account.
     Ssh {
-        /// The account on the robot. Without it, `DUCK_BOARD_USER`; without that, `radxa`.
+        /// The account on the robot. Without it, `DUCK_BOARD_USER`; without that, `microduck`.
         #[arg(long, value_name = "USER")]
         user: Option<String>,
         /// A command to run on the robot instead of opening a shell. Put it after `--`.
@@ -937,9 +937,9 @@ enum Command {
     /// and `--` ends them for anything after that this tool would otherwise read as its own. A
     /// local file that really is named `:foo` is `./:foo`.
     ///
-    /// The user resolves the way `ssh`'s does: `--user`, else `DUCK_BOARD_USER`, else `radxa`.
+    /// The user resolves the way `ssh`'s does: `--user`, else `DUCK_BOARD_USER`, else `microduck`.
     Scp {
-        /// The account on the robot. Without it, `DUCK_BOARD_USER`; without that, `radxa`.
+        /// The account on the robot. Without it, `DUCK_BOARD_USER`; without that, `microduck`.
         #[arg(long, value_name = "USER")]
         user: Option<String>,
         /// What to copy, `scp`-style, with a leading `:` for a path on the robot.
@@ -3048,20 +3048,30 @@ mod tests {
         assert_eq!(user, &None);
         assert_eq!(
             ssh_argv(&ssh_user(user.as_deref(), None), "192.168.10.136", command),
-            ["radxa@192.168.10.136", "sudo", "robotctl", "pad", "pair"]
+            [
+                "microduck@192.168.10.136",
+                "sudo",
+                "robotctl",
+                "pad",
+                "pair"
+            ]
         );
 
         assert_eq!(ssh_user(Some("pierre"), Some("antoine".into())), "pierre");
         assert_eq!(ssh_user(None, Some("antoine".into())), "antoine");
-        assert_eq!(ssh_user(None, Some("".into())), "radxa");
-        assert_eq!(ssh_user(None, None), "radxa");
+        assert_eq!(ssh_user(None, Some("".into())), "microduck");
+        assert_eq!(ssh_user(None, None), "microduck");
     }
 
     /// A leading `:` is the robot, in either operand, and everything else reaches `scp` as typed.
     #[test]
     fn scp_points_colon_paths_at_the_robot_and_leaves_the_rest_alone() {
-        let up = scp_argv("radxa", "192.168.10.136", &paths(&["report.md", ":/tmp/"]));
-        assert_eq!(up, ["report.md", "radxa@192.168.10.136:/tmp/"]);
+        let up = scp_argv(
+            "microduck",
+            "192.168.10.136",
+            &paths(&["report.md", ":/tmp/"]),
+        );
+        assert_eq!(up, ["report.md", "microduck@192.168.10.136:/tmp/"]);
 
         let down = scp_argv(
             "pierre",
@@ -3072,8 +3082,12 @@ mod tests {
 
         // Flags, several sources, and a bare `:` for the home directory — all of it passes
         // through, because the rewrite only ever looks at the first character.
-        let many = scp_argv("radxa", "192.168.10.136", &paths(&["-r", "a", "b:c", ":"]));
-        assert_eq!(many, ["-r", "a", "b:c", "radxa@192.168.10.136:"]);
+        let many = scp_argv(
+            "microduck",
+            "192.168.10.136",
+            &paths(&["-r", "a", "b:c", ":"]),
+        );
+        assert_eq!(many, ["-r", "a", "b:c", "microduck@192.168.10.136:"]);
     }
 
     /// The two refusals `scp`'s own usage error could not have explained: a copy that names no

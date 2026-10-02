@@ -35,7 +35,7 @@ export DUCK_TOKEN=github_pat_replace_with_your_token
 ```
 
 ```bash
-./scripts/provision-board.sh radxa@192.168.1.42
+./scripts/provision-board.sh microduck@192.168.1.42
 ```
 
 `--no-dev-key` for a board that should only take releases, `--ref BRANCH` to provision from a
@@ -52,7 +52,7 @@ Three commands, the first from your machine, and what `provision-board.sh` is do
 behalf above:
 
 ```bash
-scp deploy/dev-key/team.dev.pub radxa@192.168.1.42:/tmp/
+scp deploy/dev-key/team.dev.pub microduck@192.168.1.42:/tmp/
 ```
 
 ```bash
