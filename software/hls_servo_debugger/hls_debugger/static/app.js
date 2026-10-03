@@ -22,7 +22,8 @@
       positionWrap: 4096,
       positionNote: "",
       index: 0,
-      status: {},      // 关节 ID -> "done" | "fail"
+      status: {},      // 关节 ID -> "done" | "fail"（本页已完成初始化/校准 = 绿色）
+      online: {},      // 关节 ID -> true（点检/检测总线发现在线 = 黄色）
       precheck: null,
       busy: false,
     },
@@ -459,12 +460,33 @@
     await safe(api("/api/write_field", "POST", { id, addr, value }), "字段 " + addr + " 已写入");
   }
 
-  // 把后端解码项渲染成"原始计数 + 工程量"，例如 "0x2C = 44 计数 ≈ 4.4 V"。
+  // 回读值列只显示"看得懂的结果"，不再前面挂一长串原始帧/十六进制
+  // （原来是 "raw 2C 00 = 0x2C = 44 计数 ≈ 4.4 V"，窄列里会被截断）。
+  // 原始十六进制仍然放在 title 里，鼠标悬停可见。
   // 输入框里始终保留原始计数，写回时不做换算，避免精度损失。
-  function fieldText(item) {
-    const hex = "0x" + Number(item.raw).toString(16).toUpperCase();
-    if (item.text) return hex + " = " + item.text;
-    return hex + " = " + item.value + (item.unit ? " " + item.unit : "");
+  function fieldValueText(item) {
+    if (!item) return "--";
+    if (item.dtype === "enum" && item.text) return item.text;
+    if (item.dtype === "bitfield" && item.bits && item.bits.length) {
+      const on = item.bits
+        .filter((b) => (Number(item.value) >> Number(b.bit)) & 1)
+        // 位名可能很长（如"伺服相位 / 磁编码类型（0 AS5600 / 1 MT6701）"），
+        // 只取第一个分隔符之前的部分，够读懂就行。
+        .map((b) => "BIT" + b.bit + " " + String(b.name).split(/[ /（(]/)[0]);
+      if (!on.length) return "0（全关）";
+      const shown = on.slice(0, 4).join(" / ");
+      return item.value + "（" + shown + (on.length > 4 ? " …" : "") + "）";
+    }
+    if (item.scaled !== null && item.scaled !== undefined && item.unit) {
+      return item.value + " 计数 ≈ " + item.scaled + " " + item.unit;
+    }
+    if (item.unit) return item.value + " " + item.unit;
+    return String(item.value);
+  }
+
+  function fieldTitle(item, rawHex) {
+    if (!item) return rawHex ? "原始字节 " + rawHex : "";
+    return "原始字节 " + (rawHex || item.raw_hex) + " · 十进制 " + item.raw;
   }
 
   async function readFieldValue(addr, inputId, valueId, paramId) {
@@ -477,7 +499,9 @@
     const value = item ? item.value : (data.data.length === 1 ? data.data[0] : null);
     if (inputId && $(inputId)) $(inputId).value = value;
     if (valueId && $(valueId)) {
-      $(valueId).textContent = "raw " + data.raw_hex + " = " + (item ? fieldText(item) : value);
+      const el = $(valueId);
+      el.textContent = item ? fieldValueText(item) : String(value);
+      el.title = fieldTitle(item, data.raw_hex);
     }
     if (field.dtype === "bitfield" && $(inputId)) {
       const input = $(inputId);
@@ -499,7 +523,10 @@
       const input = $("paramInput-" + item.addr);
       if (input) input.value = item.value;
       const valueEl = $("paramValue-" + item.addr);
-      if (valueEl) valueEl.textContent = fieldText(item);
+      if (valueEl) {
+        valueEl.textContent = fieldValueText(item);
+        valueEl.title = fieldTitle(item);
+      }
     });
     toast("已读取 0~86 共 87 字节内存", "ok");
   }
@@ -515,7 +542,10 @@
           const input = $("paramInput-" + item.addr);
           if (input) input.value = item.value;
           const valueEl = $("paramValue-" + item.addr);
-          if (valueEl) valueEl.textContent = fieldText(item);
+          if (valueEl) {
+            valueEl.textContent = fieldValueText(item);
+            valueEl.title = fieldTitle(item);
+          }
         });
       } catch (err) {
         toast("读取组 " + group.name + " 失败：" + err.message, "error");
@@ -836,15 +866,23 @@
   // ------------------------------------------------------------------
   // 整机 15 台舵机初始化向导
   // ------------------------------------------------------------------
+  // 后端按 duck-control/src/model.rs 的 JOINT_IDS 顺序（左腿→头颈→右腿）返回关节表，
+  // 那是"关节表的权威顺序"。但界面上的 15 台列表和"下一个关节"的推进顺序按 **ID 升序**，
+  // 这样点检时一眼就能按总线 ID 找到舵机。
+  function sortJointsById(joints) {
+    return (joints || []).slice().sort((a, b) => Number(a.id) - Number(b.id));
+  }
+
   async function loadJoints() {
     const data = await safe(api("/api/joints"));
     if (!data) return;
-    S.prov.joints = data.joints || [];
+    S.prov.joints = sortJointsById(data.joints);
     S.prov.calibrateModes = data.calibrate_modes || [];
     S.prov.factoryId = data.factory_id !== undefined ? data.factory_id : 1;
     S.prov.imuBusId = data.imu_bus_id !== undefined ? data.imu_bus_id : 200;
     S.prov.positionWrap = data.position_wrap || 4096;
     S.prov.positionNote = data.position_note || "";
+    S.prov.jointOrderNote = data.joint_order_note || "";
 
     const select = $("provCalibrate");
     select.innerHTML = "";
@@ -875,6 +913,10 @@
     return S.prov.calibrateModes.filter((m) => m.id === id)[0] || null;
   }
 
+  // 15 台列表的三种状态（S.prov.joints 已按 ID 升序）：
+  //   done   = 本页向导已完成初始化/校准 → 绿色
+  //   online = 点检/检测总线发现它在应答 → 黄色
+  //   其它   = 灰（未检测或无应答）
   function renderProvProgress() {
     const wrap = $("provProgress");
     if (!wrap) return;
@@ -885,15 +927,26 @@
     }
     S.prov.joints.forEach((joint, index) => {
       const status = S.prov.status[joint.id] || "";
+      const online = !!S.prov.online[joint.id];
       const item = document.createElement("button");
       item.type = "button";
       item.className = "prov-item" + (index === S.prov.index ? " active" : "") +
-        (status === "done" ? " done" : "") + (status === "fail" ? " fail" : "");
-      const mark = status === "done" ? "✔" : (status === "fail" ? "✘" : String(index + 1));
+        (status === "done" ? " done" : "") +
+        (status === "fail" ? " fail" : "") +
+        (online && status !== "done" ? " online" : "");
+      let mark;
+      if (status === "done") mark = "✔";
+      else if (status === "fail") mark = "✘";
+      else if (online) mark = "●";
+      else mark = String(index + 1);
       item.innerHTML = "<span class=\"prov-mark\">" + mark + "</span>" +
         "<span class=\"prov-name\">" + joint.name + "</span>" +
         "<span class=\"prov-badge\">ID " + joint.id + "</span>";
-      item.title = joint.group + " · home " + joint.home_deg + "° (" + joint.home_counts + " 计数)";
+      const stateText = status === "done" ? "本页已完成初始化/校准"
+        : (status === "fail" ? "本页初始化失败"
+          : (online ? "在线（未在本页初始化）" : "未检测到应答"));
+      item.title = joint.group + " · home " + joint.home_deg + "° (" +
+        joint.home_counts + " 计数) · " + stateText;
       item.addEventListener("click", () => {
         if (S.prov.busy) return;
         S.prov.index = index;
@@ -988,6 +1041,17 @@
     updateProvButtons();
   }
 
+  // 用一次"完整点名"（15 个关节逐个 PING）的结果刷新黄色状态。
+  // 名单之外的关节一律置为不在线，避免上一次点检留下的黄点骗人。
+  function markOnlineFromList(presentIds) {
+    const present = {};
+    (presentIds || []).forEach((id) => { present[Number(id)] = true; });
+    const next = {};
+    S.prov.joints.forEach((joint) => { next[joint.id] = !!present[Number(joint.id)]; });
+    S.prov.online = next;
+    renderProvProgress();
+  }
+
   async function provisionCheck() {
     const joint = provSelected();
     if (!joint) return;
@@ -1001,6 +1065,8 @@
     setProvBusy(false);
     if (!data) return;
     S.prov.precheck = data;
+    // 预检逐个 PING 了全部 15 个关节，所以这就是一次完整的在线点名：黄点全部刷新。
+    markOnlineFromList(data.present_joints);
     updateProvButtons();
     const lines = [];
     lines.push("目标关节：" + data.target.name + "（ID " + data.target.id + "）");
@@ -1035,10 +1101,28 @@
     if (meta && meta.id === "offset") {
       confirmText += "将把 31 号位置偏移改成本关节的 home 姿态（" + joint.home_deg + "°）。\n";
     }
-    if ($("provMultiturn").checked && joint.home_counts < 0) {
-      confirmText += "本关节 home 角是负的（" + joint.home_counts +
-        " 计数），需要多圈位置控制；这一步会把 9/11 号角度限制写成 0。\n";
+    if ($("provMultiturn").checked) {
+      if (joint.home_counts < 0) {
+        confirmText += "本关节 home 角是负的（" + joint.home_counts +
+          " 计数），需要多圈位置控制；这一步会把 9/11 号角度限制写成 0。\n";
+      } else {
+        confirmText += "会把 9/11 号角度限制写成 0（打开多圈，取消固件行程限制）。\n";
+      }
+    } else {
+      confirmText += "会把 9/11 号角度限制写成 0/4095（单圈行程）。";
+      if (joint.home_counts < 0) {
+        confirmText += "注意：本关节 home 角是负的（" + joint.home_counts +
+          " 计数），单圈行程下负目标会被夹到 0，这颗关节装好后到不了 home 姿态。";
+      }
+      confirmText += "\n";
     }
+    const protectOn = [];
+    if ($("provProtectVoltage").checked) protectOn.push("电压保护");
+    if ($("provProtectCurrent").checked) protectOn.push("过流保护");
+    confirmText += protectOn.length
+      ? "19 号卸载条件会打开：" + protectOn.join("、") +
+        "（触发时舵机卸载，关节会松掉）。\n"
+      : "19 号卸载条件：电压/过流保护都关闭（只保留舵机原有的其它保护位）。\n";
     confirmText += "会写 EPROM，请确认可以随时断电。继续？";
     if (!window.confirm(confirmText)) return;
 
@@ -1053,6 +1137,8 @@
       gain_kp: Number($("provKp").value),
       gain_kd: Number($("provKd").value),
       multiturn: $("provMultiturn").checked,
+      protect_voltage: $("provProtectVoltage").checked,
+      protect_over_current: $("provProtectCurrent").checked,
       speed: Number($("provSpeed").value) || 0,
       acc: Number($("provAcc").value) || 0,
       timeout_ms: getTimeoutMs(100),
@@ -1083,6 +1169,15 @@
     lines.push((data.ok ? "✔ 初始化成功" : "✘ 初始化未完成") +
       (data.error ? "：" + data.error : ""));
     lines.push("目标：" + data.target.name + "（ID " + data.target.id + "），校准方式：" + data.calibrate);
+    if (data.multiturn !== undefined) {
+      lines.push("多圈位置控制：" + (data.multiturn ? "已打开（9/11 号 = 0/0）"
+        : "已关闭（9/11 号 = 0/4095，单圈行程）"));
+    }
+    if (data.protect) {
+      lines.push("19 号卸载条件：电压保护 " + (data.protect.voltage ? "打开" : "关闭") +
+        "、过流保护 " + (data.protect.over_current ? "打开" : "关闭") +
+        "（BIT1/BIT2 保持舵机原值）");
+    }
     lines.push("");
     (data.steps || []).forEach((step) => {
       lines.push((step.ok ? "[ OK ] " : "[FAIL] ") + step.name + "：" + step.detail);
@@ -1134,9 +1229,12 @@
       provMetric("锁标志", snap.lock, snap.lock === 1 ? "EPROM 掉电不保存" : "EPROM 掉电保存"),
       provMetric("扭矩", snap.torque, "40 号寄存器"),
       provMetric("模式", snap.mode, (S.modeNames && S.modeNames[snap.mode]) || ""),
-      provMetric("多圈位置控制", snap.multiturn ? "已打开" : "未打开",
+      provMetric("多圈位置控制", snap.multiturn ? "已打开" : "已关闭",
         "9/11 号 = " + snap.min_angle_limit + "/" + snap.max_angle_limit +
-        (snap.multiturn ? " · 负关节角可用" : " · 负目标会被夹到 0")),
+        (snap.multiturn ? " · 负关节角可用" : " · 单圈行程，负目标会被夹到 0")),
+      provMetric("19 号卸载条件",
+        snap.unload_condition + " (0x" + Number(snap.unload_condition).toString(16).toUpperCase().padStart(2, "0") + ")",
+        protectText(snap)),
       provMetric("电压", snap.voltage + " V", "温度 " + snap.temperature + " °C"),
       provMetric("舵机状态", snap.status, snap.status === 0 ? "正常" : "异常（位屏蔽 0~3）"),
       provMetric("固件", snap.firmware, "舵机 " + snap.servo_version),
@@ -1150,16 +1248,29 @@
     const data = await safe(api("/api/provision/census", "POST", {}));
     setProvBusy(false);
     if (!data) return;
-    showResult("provResult", "点检完成：" + data.present_count + " / " + data.total + " 台在线。");
+    // 点检就是一次完整点名：在线的点黄，本页已完成的仍然是绿。
+    S.prov.online = {};
+    (data.items || []).forEach((row) => { S.prov.online[row.id] = !!row.present; });
+    renderProvProgress();
+    showResult("provResult", "点检完成：" + data.present_count + " / " + data.total +
+      " 台在线（黄 = 在线，绿 = 本页已完成初始化/校准）。");
     const box = $("provCensus");
     if (!box) return;
-    const rows = ["<table><thead><tr><th>关节</th><th>ID</th><th>在线</th><th>位置</th><th>电压</th><th>温度</th><th>状态</th><th>备注</th></tr></thead><tbody>"];
-    (data.items || []).forEach((row) => {
+    const items = (data.items || []).slice().sort((a, b) => Number(a.id) - Number(b.id));
+    const rows = ["<table><thead><tr><th>ID</th><th>关节</th><th>在线</th><th>位置</th><th>多圈</th><th>19 号卸载条件</th><th>电压</th><th>温度</th><th>状态</th><th>备注</th></tr></thead><tbody>"];
+    items.forEach((row) => {
       const s = row.snapshot || {};
-      rows.push("<tr><td>" + row.name + "<div class=\"prov-sub\">" + row.group + "</div></td>" +
-        "<td class=\"mono\">" + row.id + "</td>" +
-        "<td>" + (row.present ? "✔" : "—") + "</td>" +
+      const done = S.prov.status[row.id] === "done";
+      rows.push("<tr><td class=\"mono\">" + row.id +
+        (done ? " <span class=\"ok-mark\">✔</span>" : "") + "</td>" +
+        "<td>" + row.name + "<div class=\"prov-sub\">" + row.group + "</div></td>" +
+        "<td>" + (row.present ? "<span class=\"warn-state\">● 在线</span>" : "—") + "</td>" +
         "<td class=\"mono\">" + (s.position !== undefined ? s.position + " (" + s.position_deg + "°)" : "—") + "</td>" +
+        "<td class=\"mono\">" + (s.min_angle_limit !== undefined
+          ? (s.multiturn ? "开 (0/0)" : "关 (" + s.min_angle_limit + "/" + s.max_angle_limit + ")")
+          : "—") + "</td>" +
+        "<td class=\"mono\">" + (s.unload_condition !== undefined
+          ? s.unload_condition + " (" + protectText(s) + ")" : "—") + "</td>" +
         "<td class=\"mono\">" + (s.voltage !== undefined ? s.voltage + " V" : "—") + "</td>" +
         "<td class=\"mono\">" + (s.temperature !== undefined ? s.temperature + " °C" : "—") + "</td>" +
         "<td class=\"mono\">" + (s.status !== undefined ? s.status : "—") + "</td>" +
@@ -1167,6 +1278,16 @@
     });
     rows.push("</tbody></table>");
     box.innerHTML = rows.join("");
+  }
+
+  // 19 号卸载条件的可读文本：只列打开的保护位。
+  function protectText(snap) {
+    const on = [];
+    if (snap.protect_voltage) on.push("电压");
+    if (snap.unload_condition & (1 << 1)) on.push("磁编码");
+    if (snap.unload_condition & (1 << 2)) on.push("过热");
+    if (snap.protect_over_current) on.push("过流");
+    return on.length ? on.join("+") : "全关";
   }
 
   async function provisionTorqueOff() {
@@ -1200,8 +1321,9 @@
   }
 
   function provisionReset() {
-    if (!window.confirm("清空本页的进度标记（不会改动舵机）？")) return;
+    if (!window.confirm("清空本页的进度标记与在线状态（不会改动舵机）？")) return;
     S.prov.status = {};
+    S.prov.online = {};
     S.prov.index = 0;
     S.prov.precheck = null;
     renderProvProgress();
@@ -1285,9 +1407,18 @@
     $("btnRegAction").addEventListener("click", regAction);
     $("btnReadGoalPos").addEventListener("click", readGoalPosition);
     $("btnUsePresentPos").addEventListener("click", usePresentPosition);
-    $("btnCalibrate").addEventListener("click", () => {
-      if (window.confirm("中位校准会关闭扭矩并执行 CAL，确认继续？")) {
-        specialCommand("/api/calibrate", "中位校准");
+    $("btnCalibrate").addEventListener("click", async () => {
+      const id = Number($("posId").value);
+      const save = $("calSaveEprom").checked;
+      const extra = save
+        ? "CAL 之后会补写 55 号 = 1（重新上锁，EPROM 掉电不保存）。"
+        : "CAL 之后**不会**重新上锁，舵机会留在解锁状态（EPROM 掉电保存）。";
+      if (!window.confirm("中位校准会关闭扭矩、解锁 EPROM 并执行 CAL，把当前位置写成位置偏移中点。\n" + extra + "\n确认继续？")) return;
+      const data = await safe(api("/api/calibrate", "POST", { id, save }), "中位校准已执行");
+      if (data) {
+        showResult("posCalResult", "ID " + id + " 中位校准完成：位置偏移已写入" +
+          (data.saved ? "，并已重新上锁（55 号 = 1）" : "，舵机保持解锁（55 号 = 0）") +
+          "。CAL 后位置读数应为 2048 计数（180°）。");
       }
     });
     $("btnWriteAngleLimits").addEventListener("click", async () => {
@@ -1324,7 +1455,12 @@
     $("btnRawPing").addEventListener("click", rawPing);
     $("btnAdvReset").addEventListener("click", () => { if (window.confirm("RESET 会恢复出厂设置，确认？")) specialCommand("/api/reset", "RESET"); });
     $("btnAdvRecovery").addEventListener("click", () => specialCommand("/api/recovery", "RECOVERY"));
-    $("btnAdvCal").addEventListener("click", () => { if (window.confirm("CAL 会改变位置偏移，确认？")) specialCommand("/api/calibrate", "CAL"); });
+    $("btnAdvCal").addEventListener("click", () => {
+      if (window.confirm("CAL 会改变位置偏移；这里按默认的“保存并重新上锁”执行" +
+        "（解锁 → CAL → 55 号写回 1）。确认？")) {
+        specialCommand("/api/calibrate", "CAL");
+      }
+    });
     $("btnAdvLock").addEventListener("click", () => lockEprom(1));
     $("btnAdvUnlock").addEventListener("click", () => lockEprom(0));
 

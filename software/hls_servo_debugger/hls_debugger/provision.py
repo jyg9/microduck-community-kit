@@ -33,7 +33,9 @@
    一圈 ``[0, 4095]`` 内：写目标 −500 **协议层被接受**（42 号回读 −500），
    但 67 号"目标位置回读"是 0、舵机不动。把 ``9 号 = 0、11 号 = 0``
    （厂商内存表："多圈绝对位置控制时此值为 0"）之后，同一个 −500 真的走到了。
-   所以 **microduck 必须打开多圈**：关节表里有 4 个 home 姿态角是负的。
+   所以 **microduck 整机必须打开多圈**：关节表里有 4 个 home 姿态角是负的。
+   界面上这个开关**默认关闭**（台面单机调试一圈内更安全），两个方向都会真的写
+   9/11 号：勾选写 0/0（多圈），取消写 0/4095（单圈行程）。
 2. **打开多圈、位置偏移(31) 保持 0 时，坐标是干净的**：实测写目标
    −500 → 当前位置 −500、−1000 → −999、−300 → −301，67 号目标回读同步跟随；
    同时 31 号 = 0 时读数就是编码器值。**这就是推荐配置**，
@@ -82,11 +84,14 @@ from .protocol import (
     ADDR_RESPONSE_LEVEL,
     ADDR_SECOND_ID,
     ADDR_TORQUE_ENABLE,
+    ADDR_UNLOAD_CONDITION,
     EXPECTED_BAUD_CODE,
     FACTORY_ID,
     HLSBus,
     IMU_BUS_ID,
     ProtocolError,
+    UNLOAD_BIT_OVER_CURRENT,
+    UNLOAD_BIT_VOLTAGE,
 )
 
 # ── 换算常量（与 duck-control/src/feetech.rs 一致）───────────────────────────
@@ -138,6 +143,24 @@ POSITION_KP_DEFAULT = 32
 POSITION_KD_DEFAULT = 0
 #: 位置环增益寄存器的合法范围（厂商内存表：0 ~ 254）。
 POSITION_GAIN_MAX = 254
+
+# ── 9/11 号角度限制：多圈开关的两个取值 ─────────────────────────────────────
+#: 多圈绝对位置控制：厂商内存表在 9/11 号上写明"多圈绝对位置控制时此值为 0"。
+LIMITS_MULTITURN = (0, 0)
+#: 单圈行程（出厂值）：9 号 = 0、11 号 = 4095，位置被夹在一圈内。
+LIMITS_SINGLE_TURN = (0, 4095)
+
+# ── 19 号「卸载条件」：默认关闭电压保护与过流保护 ────────────────────────────
+# 厂商内存表 19 号是位域（见 memory_table.PROTECT_BITS）：
+#   BIT0 电压保护 / BIT1 磁编码保护 / BIT2 过热保护 / BIT3 过流保护
+# 置 1 = 开启，触发时舵机**卸载**（不再输出扭矩）。
+#
+# microduck 站在一条腿上的时候扭矩被卸掉就是摔倒，所以这两项**默认不打开**：
+# 电压保护会在电池瞬间跌落时卸力，过流保护会在踩到东西/被撞时卸力，
+# 两者都属于"宁可不保护也不要中途松腿"的取舍，交给装配/调试的人按需打开。
+# 工具只动 BIT0 和 BIT3，BIT1/BIT2（磁编码、过热）由厂商固件决定，**读改写保留**。
+PROTECT_VOLTAGE_DEFAULT = False
+PROTECT_OVER_CURRENT_DEFAULT = False
 
 #: 出厂新舵机的两个特征。
 FRESH_ID = FACTORY_ID
@@ -347,6 +370,53 @@ class Provisioner(object):
                    "两边保持一致才有意义")
         return log.add("写位置环增益", True, detail)
 
+    def _write_unload_condition(self, servo_id, log, voltage=None, over_current=None):
+        """写 19 号「卸载条件」的 BIT0（电压保护）与 BIT3（过流保护）。
+
+        19 号是 EPROM 位域，所以按**读改写**处理：只动 BIT0/BIT3，
+        BIT1（磁编码）与 BIT2（过热）保持舵机原值，避免"初始化顺便把厂商默认
+        打开的保护关掉"这种事。``voltage`` / ``over_current`` 为 None 表示这一次
+        不碰那一位，True/False 表示显式置位/清零。
+
+        参数默认见 ``PROTECT_VOLTAGE_DEFAULT`` / ``PROTECT_OVER_CURRENT_DEFAULT``
+        （都不打开）：触发卸载 = 关节突然松掉 = 机器人摔倒，所以默认不开。
+        """
+        targets = []
+        if voltage is not None:
+            targets.append((UNLOAD_BIT_VOLTAGE, bool(voltage), "电压保护"))
+        if over_current is not None:
+            targets.append((UNLOAD_BIT_OVER_CURRENT, bool(over_current), "过流保护"))
+        if not targets:
+            return log.add("写卸载条件（19 号）", True, "按设置跳过（保持舵机原值）")
+
+        try:
+            before = self._read_byte(servo_id, ADDR_UNLOAD_CONDITION)
+        except ProtocolError as exc:
+            return log.add("写卸载条件（19 号）", False,
+                           "写入前回读失败：%s" % exc.message)
+
+        value = before
+        for bit, enabled, _label in targets:
+            value = (value | (1 << bit)) if enabled else (value & ~(1 << bit))
+        value &= 0xFF
+        self._write_eeprom(servo_id, ADDR_UNLOAD_CONDITION, bytes([value]))
+        try:
+            after = self._read_byte(servo_id, ADDR_UNLOAD_CONDITION)
+        except ProtocolError as exc:
+            return log.add("写卸载条件（19 号）", False,
+                           "写入后回读失败：%s" % exc.message)
+
+        ok = after == value
+        detail = ("19 号 %d (0x%02X) → %d (0x%02X)：%s"
+                  % (before, before, after, after,
+                     "、".join("%s（BIT%d）%s" % (label, bit, "打开" if enabled else "关闭")
+                               for bit, enabled, label in targets)))
+        if ok and after != before:
+            detail += "；其余位保持原值"
+        if not ok:
+            detail += "（期望 %d (0x%02X)）" % (value, value)
+        return log.add("写卸载条件（19 号）", ok, detail)
+
     def _write_eeprom(self, servo_id, addr, data):
         """按厂商 unLockEprom/LockEprom 的方式写一个 EPROM 寄存器。
 
@@ -392,6 +462,11 @@ class Provisioner(object):
                              and info["max_angle_limit"] == 0)
         info["position_offset"] = self._read_word_signed(servo_id, ADDR_POSITION_OFFSET)
         info["torque"] = self._read_byte(servo_id, ADDR_TORQUE_ENABLE, timeout=timeout)
+        info["unload_condition"] = self._read_byte(
+            servo_id, ADDR_UNLOAD_CONDITION, timeout=timeout)
+        info["protect_voltage"] = bool(info["unload_condition"] & (1 << UNLOAD_BIT_VOLTAGE))
+        info["protect_over_current"] = bool(
+            info["unload_condition"] & (1 << UNLOAD_BIT_OVER_CURRENT))
 
         feedback = self.bus.feedback(servo_id, timeout=timeout).data
         position = _signed(_word(feedback[0], feedback[1]))
@@ -510,27 +585,34 @@ class Provisioner(object):
         }
 
     # -- 多圈绝对位置控制 ────────────────────────────────────────────────
-    def _enable_multiturn(self, servo_id, log):
-        """把 9/11 号角度限制都写成 0，打开多圈绝对位置控制。
+    def _set_multiturn(self, servo_id, log, enable=True):
+        """按需把 9/11 号角度限制写成「多圈(0/0)」或「单圈(0/4095)」。
 
         厂商内存表在 9/11 号上写得很清楚："多圈绝对位置控制时此值为 0"，
         而出厂 11 号是 4095。真机实测（HD-1910-C001 / 固件 3.46）：
 
         * 出厂 ``11 号 = 4095`` 时，写目标位置 −500 **协议层被接受**
-          （42 号回读 −500），但舵机**不动**，67 号"目标位置回读"是 0，
+          （42 号回读 −500），但**舵机不动**，67 号"目标位置回读"是 0，
           位置读数被夹在一圈内（负结果回绕成 ``4096 + 值``）；
         * 把 ``9 号 = 0、11 号 = 0`` 之后，同一个 −500 真的走到了：
           当前位置 = −500（0x81F4）、67 号回读 = −500。
 
-        microduck 的 ``DEFAULT_POSITION`` 里有 4 个负角关节，
-        所以这一步是"能不能站对"的前提，不是可选项——但仍然做成可关，
-        因为一台只在一圈内工作的舵机（例如云台）不需要它。
+        microduck 的 ``DEFAULT_POSITION`` 里有 4 个负角关节，所以整机上这一步
+        是"能不能站对"的前提；但**台面单机调试默认不开**：多圈会取消固件行程
+        限制，一圈内更安全。
+
+        这个开关两个方向都**真的写寄存器**：``enable=False`` 不是"跳过"，
+        而是把 9/11 号写回单圈行程（0/4095）并回读校验——否则对一台已经开过多圈
+        的舵机，取消勾选毫无作用（这正是旧版"选项不起作用"的原因）。
         """
+        low_want, high_want = LIMITS_MULTITURN if enable else LIMITS_SINGLE_TURN
+        name = ("打开多圈位置控制（9/11 号写 0）" if enable
+                else "关闭多圈，恢复单圈行程（9/11 号写 0/4095）")
         acked = []
-        for addr, label in ((ADDR_MIN_ANGLE_LIMIT, "9 号最小角度限制"),
-                            (ADDR_MAX_ANGLE_LIMIT, "11 号最大角度限制")):
-            ok, note = self._write(servo_id, ADDR_LOCK, bytes([LOCK_EPROM_SAVED]))
-            ack, note = self._write(servo_id, addr, b"\x00\x00")
+        for addr, value in ((ADDR_MIN_ANGLE_LIMIT, low_want),
+                            (ADDR_MAX_ANGLE_LIMIT, high_want)):
+            self._write(servo_id, ADDR_LOCK, bytes([LOCK_EPROM_SAVED]))
+            ack, note = self._write(servo_id, addr, int(value).to_bytes(2, "little"))
             time.sleep(EEPROM_SETTLE)
             self._write(servo_id, ADDR_LOCK, bytes([LOCK_EPROM_VOLATILE]))
             acked.append(ack)
@@ -538,13 +620,15 @@ class Provisioner(object):
             low = self.bus.read_word(servo_id, ADDR_MIN_ANGLE_LIMIT)
             high = self.bus.read_word(servo_id, ADDR_MAX_ANGLE_LIMIT)
         except ProtocolError as exc:
-            return False, log.add("打开多圈位置控制（9/11 号写 0）", False, exc.message)
-        ok = low == 0 and high == 0
-        detail = ("回读 9 号 = %d、11 号 = %d（都应为 0，取消固件行程限制）"
-                  % (low, high))
+            return False, log.add(name, False, exc.message)
+        ok = low == low_want and high == high_want
+        detail = ("回读 9 号 = %d、11 号 = %d（期望 %d/%d：%s）"
+                  % (low, high, low_want, high_want,
+                     "取消固件行程限制，负关节角可用" if enable
+                     else "行程锁在一圈内，负目标会被夹到 0"))
         if not all(acked):
             detail += "；有一次写入没收到应答，但回读是对的"
-        return ok, log.add("打开多圈位置控制（9/11 号写 0）", ok, detail)
+        return ok, log.add(name, ok, detail)
 
     # -- 校准 ────────────────────────────────────────────────────────────
     def _read_position(self, servo_id):
@@ -694,9 +778,11 @@ class Provisioner(object):
 
     # -- 主流程 ──────────────────────────────────────────────────────────
     def provision(self, target_id, calibrate="cal", write_response_level=True,
-                  multiturn=True, mode="fresh", speed=60, acc=30, timeout=None,
+                  multiturn=False, mode="fresh", speed=60, acc=30, timeout=None,
                   gain_kp=POSITION_KP_DEFAULT, gain_kd=POSITION_KD_DEFAULT,
-                  write_gain=True):
+                  write_gain=True,
+                  protect_voltage=PROTECT_VOLTAGE_DEFAULT,
+                  protect_over_current=PROTECT_OVER_CURRENT_DEFAULT):
         """把一颗舵机初始化成 target_id 对应的关节。
 
         mode：
@@ -707,9 +793,14 @@ class Provisioner(object):
         默认是厂商默认的 32 / 0。**不要用 robotd 那份给 XL330 调过的 200**
         （实测 200 会让关节自激振荡、5 A、74 °C，见本模块顶部的常数说明）。
 
-        multiturn：把 9/11 号角度限制写成 0，打开多圈绝对位置控制。
-        **microduck 需要它**：15 个关节里有 4 个的 home 姿态角是负的，
-        出厂 ``11 号 = 4095`` 会把负目标夹到 0（真机实测，见 `_enable_multiturn`）。
+        multiturn：**默认 False**（单圈行程 9/11 = 0/4095）。
+        整机装配时 microduck 需要打开多圈——15 个关节里有 4 个的 home 姿态角
+        是负的，出厂 ``11 号 = 4095`` 会把负目标夹到 0（真机实测，见
+        `_set_multiturn`）；但台面上单机调试时一圈内更安全，所以默认不打开。
+        **两个方向都会真的写寄存器**：False 是把 9/11 号写回 0/4095，不是跳过。
+
+        protect_voltage / protect_over_current：19 号「卸载条件」的 BIT0/BIT3，
+        默认都关闭（触发卸载 = 关节松掉 = 摔倒）。按读改写处理，BIT1/BIT2 不动。
         """
         target = joint_by_id(target_id)
         if target is None:
@@ -723,12 +814,20 @@ class Provisioner(object):
 
         target_id = int(target_id)
         source_id = FRESH_ID if mode == "fresh" else target_id
+        multiturn = bool(multiturn)
+        protect_voltage = bool(protect_voltage)
+        protect_over_current = bool(protect_over_current)
         log = StepLog()
         result = {
             "target": target,
             "mode": mode,
             "calibrate": calibrate,
             "source_id": source_id,
+            "multiturn": multiturn,
+            "protect": {
+                "voltage": protect_voltage,
+                "over_current": protect_over_current,
+            },
             "steps": [],
             "ok": False,
             "error": "",
@@ -809,27 +908,34 @@ class Provisioner(object):
             log.add("写应答状态级别（8 号，EPROM）", level == 1,
                     "回读 = %d（期望 1）%s" % (level, "" if acked else "；" + note))
 
-        # 6. 多圈绝对位置控制：microduck 有 4 个负角关节，必须先打开，
-        #    否则负目标会被 11 号角度限制夹到 0（真机实测）。
-        if multiturn:
-            ok, _step = self._enable_multiturn(target_id, log)
-            if not ok:
+        # 6. 9/11 号角度限制：多圈(0/0) 或 单圈(0/4095)，两个方向都真的写。
+        ok, _step = self._set_multiturn(target_id, log, enable=multiturn)
+        if not ok:
+            if multiturn:
                 return finish(
                     False,
                     "打开多圈位置控制失败：9/11 号角度限制没能写成 0，"
                     "负目标位置会被夹到 0，负角关节无法到位。",
                 )
-        else:
-            log.add("多圈位置控制", True, "按设置跳过（保持出厂一圈行程）")
+            return finish(
+                False,
+                "恢复单圈行程失败：9/11 号角度限制没能写成 0/4095。",
+            )
 
-        # 7. 位置环增益：EEPROM 21/22 + RAM 50/51
+        # 7. 19 号卸载条件：电压保护 / 过流保护（默认都关闭，读改写只动 BIT0/BIT3）
+        self._write_unload_condition(
+            target_id, log,
+            voltage=protect_voltage, over_current=protect_over_current,
+        )
+
+        # 8. 位置环增益：EEPROM 21/22 + RAM 50/51
         result["gain"] = {"kp": int(gain_kp), "kd": int(gain_kd)}
         if write_gain:
             self._write_gain(target_id, log, kp=gain_kp, kd=gain_kd)
         else:
             log.add("写位置环增益", True, "按设置跳过（保持舵机原值）")
 
-        # 8. 初始位置校准
+        # 9. 初始位置校准
         if calibrate == "cal":
             self._write(target_id, ADDR_LOCK, bytes([LOCK_EPROM_SAVED]))
             ok, _step, before, after = self._calibrate_cal(target_id, log)
@@ -863,7 +969,7 @@ class Provisioner(object):
         else:
             log.add("初始位置校准", True, "按设置跳过（只改 ID）")
 
-        # 9. 打开写入锁（写 1），保护 EPROM 不再被误写。
+        # 10. 打开写入锁（写 1），保护 EPROM 不再被误写。
         self._write(target_id, ADDR_LOCK, bytes([LOCK_EPROM_VOLATILE]))
         try:
             lock = self._read_byte(target_id, ADDR_LOCK)
@@ -872,7 +978,7 @@ class Provisioner(object):
         log.add("打开写入锁（55 号写 1）", lock == LOCK_EPROM_VOLATILE,
                 "回读 = %d（1 = EPROM 掉电不保存）" % lock)
 
-        # 9. 结束前把扭矩关掉，除非是"转到中位"需要它保持住以便装舵盘。
+        # 11. 结束前把扭矩关掉，除非是"转到中位"需要它保持住以便装舵盘。
         if calibrate == "mid":
             log.add("扭矩", True, "保持开启：输出轴停在 0 点，方便按标记装舵盘")
         else:
@@ -903,6 +1009,22 @@ class Provisioner(object):
                 snap["min_angle_limit"] == 0 and snap["max_angle_limit"] == 0,
                 "9/11 号 = %d/%d" % (snap["min_angle_limit"], snap["max_angle_limit"]),
             ))
+        else:
+            checks.append((
+                "单圈行程",
+                snap["min_angle_limit"] == LIMITS_SINGLE_TURN[0]
+                and snap["max_angle_limit"] == LIMITS_SINGLE_TURN[1],
+                "9/11 号 = %d/%d" % (snap["min_angle_limit"], snap["max_angle_limit"]),
+            ))
+        checks.append((
+            "卸载条件",
+            snap["protect_voltage"] == protect_voltage
+            and snap["protect_over_current"] == protect_over_current,
+            "19 号 = %d（电压保护 %s、过流保护 %s）"
+            % (snap["unload_condition"],
+               "开" if snap["protect_voltage"] else "关",
+               "开" if snap["protect_over_current"] else "关"),
+        ))
         verified = all(item[1] for item in checks)
         log.add(
             "回读校验",

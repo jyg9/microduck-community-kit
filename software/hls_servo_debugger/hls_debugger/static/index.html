@@ -145,6 +145,13 @@
           请先确认机械安全、可以随时断电。
         </div>
         <div id="provProgress" class="prov-progress"></div>
+        <div class="prov-legend">
+          <span class="prov-legend-item online">在线</span>
+          <span class="prov-legend-item done">本页已完成初始化/校准</span>
+          <span class="prov-legend-item">未检测 / 无应答</span>
+          <span class="muted">列表按 <b>ID 升序</b>排列；“点检 15 台”或“检测总线”之后，
+            在线的舵机点亮黄色，本页已经完成初始化的关节显示绿色。</span>
+        </div>
       </div>
 
       <div class="grid-2">
@@ -192,14 +199,32 @@
           </div>
 
           <label class="check-row">
-            <input id="provMultiturn" type="checkbox" checked>
-            打开多圈绝对位置控制（9/11 号角度限制写 0）
+            <input id="provMultiturn" type="checkbox">
+            打开多圈绝对位置控制（勾选 = 9/11 号写 0/0；不勾选 = 单圈 0/4095）
           </label>
           <div class="hint warn" id="provMultiturnNote">
             实测本机：出厂 <b>11 号 = 4095</b> 会把行程锁在一圈内，写负的目标位置
             协议层虽被接受但舵机<b>不动</b>；把 9/11 号都写成 0 之后负目标才会执行。
-            15 个关节里有 4 个 home 姿态角是负的，所以这一项默认打开。
-            代价是固件不再限制行程，行程要靠上层软件兜住。
+            15 个关节里有 4 个 home 姿态角是负的，<b>整机装配时必须打开</b>。
+            <b>本开关默认关闭</b>——台面上单机调试时一圈内更安全，
+            代价是固件不再限制行程、前后要多留余量。
+            注意<b>两个方向都会真的写寄存器</b>：取消勾选是把 9/11 号写回
+            <b>0/4095</b>，不是「跳过不写」，所以对一台已经开过多圈的舵机同样有效。
+          </div>
+          <label class="check-row">
+            <input id="provProtectVoltage" type="checkbox">
+            19 号卸载条件：打开<b>电压保护</b>（BIT0）
+          </label>
+          <label class="check-row">
+            <input id="provProtectCurrent" type="checkbox">
+            19 号卸载条件：打开<b>过流保护</b>（BIT3）
+          </label>
+          <div class="hint" id="provProtectNote">
+            19 号是 EPROM 位域：BIT0 电压、BIT1 磁编码、BIT2 过热、BIT3 过流，
+            置 1 表示触发时舵机<b>卸载</b>（不再输出扭矩）。工具只按读改写动
+            BIT0/BIT3，BIT1/BIT2 保持舵机原值（实测本机 16 台都是
+            <code>19 = 4</code>，即出厂只开了过热保护）。
+            <b>两项默认都不打开</b>：关节中途卸力就是摔倒，这个取舍按使用场景自己定。
           </div>
           <label class="check-row">
             <input id="provResponseLevel" type="checkbox" checked>
@@ -339,8 +364,18 @@
             <button id="btnWriteTorqueLimit" class="btn">写入转矩限制</button>
             <button id="btnCalibrate" class="btn btn-danger">中位校准（CAL）</button>
           </div>
+          <label class="check-row">
+            <input id="calSaveEprom" type="checkbox" checked>
+            保存到 EPROM 并重新上锁（CAL 之后补写 55 号 = 1）
+          </label>
+          <div id="posCalResult" class="result-box muted">中位校准结果将显示在这里。</div>
           <div class="hint warn">
-            “中位校准”会关闭扭矩、关闭写入锁并执行 CAL 指令，把当前位置写为位置偏移中点。请先固定好机械零位。
+            “中位校准”会关闭扭矩、关闭写入锁并执行 CAL 指令，把当前位置写为位置偏移中点。
+            CAL 写的是 <b>31 号位置偏移（EPROM 字段）</b>，而写入锁打开（55 号 = 1）时
+            EPROM 写入<b>掉电不保存</b>，所以解锁（55 号 = 0）是这一步的必要前提。
+            勾选上面这一项会在 CAL 之后补写 55 号 = 1，把舵机恢复成「EPROM 掉电不保存」
+            的保护状态，不留一颗没上锁的舵机（CAL 本身已经写完并保存，上锁不会撤销它）；
+            取消勾选则保持解锁，方便连续做多次 CAL / 偏移调试。请先固定好机械零位。
           </div>
         </div>
       </div>

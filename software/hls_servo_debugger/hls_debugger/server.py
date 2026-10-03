@@ -22,6 +22,7 @@ from . import memory_table
 from . import provision
 from .memory_table import BAUD_CODES, BAUD_CODE_NAMES, MODE_NAMES
 from .protocol import (
+    ADDR_UNLOAD_CONDITION,
     BROADCAST_ID,
     EXPECTED_BAUD_CODE,
     FACTORY_ID,
@@ -414,11 +415,21 @@ def api_recovery():
 @app.route("/api/calibrate", methods=["POST"])
 @handle_protocol
 def api_calibrate():
+    """厂商 CAL 中位校准：关扭矩 → 解锁 EPROM → CAL →（可选）重新上锁。
+
+    CAL 会写 31 号位置偏移（EPROM），必须先解锁才会掉电保存；`save=True`
+    （默认）在写完之后把写入锁打开（55 号 = 1），恢复到"EPROM 掉电不保存"
+    的保护状态。`save=False` 保持解锁，方便连续校准。
+    """
     data = payload()
     sid = payload_int(data, "id", 1, 0, 253)
-    timeout_ms = float(data.get("timeout_ms", 200))
-    frame = bus.calibration_ofs(sid)
-    return ok({"calibrate": frame_json(frame)})
+    save = bool(data.get("save", True))
+    frame, lock_frame = bus.calibration_ofs(sid, save=save)
+    return ok({
+        "calibrate": frame_json(frame),
+        "saved": save,
+        "lock": frame_json(lock_frame) if lock_frame is not None else None,
+    })
 
 
 # ----------------------------------------------------------------------
@@ -646,6 +657,9 @@ def api_joints():
     return ok({
         "joints": provision.get_joints(),
         "groups": provision.JOINT_GROUPS,
+        "joint_order_note": "本接口按 duck-control/src/model.rs 的 JOINT_IDS 顺序返回"
+                            "（左腿→头颈→右腿）；界面为了按总线 ID 找舵机，"
+                            "把 15 台列表与“下一个关节”的推进顺序显示成 ID 升序。",
         "calibrate_modes": provision.calibrate_modes(),
         "factory_id": FACTORY_ID,
         "imu_bus_id": IMU_BUS_ID,
@@ -665,9 +679,26 @@ def api_joints():
                          "负值有时回绕成 0~4095、有时带 BIT15 报负值，"
                          "所以校准按一圈取模比较并留 %d 计数容差。"
                          % provision.POSITION_TOLERANCE,
+        "multiturn_default": False,
+        "multiturn_limits": {
+            "on": list(provision.LIMITS_MULTITURN),
+            "off": list(provision.LIMITS_SINGLE_TURN),
+        },
         "multiturn_note": "实测本机：出厂 11 号最大角度限制 = 4095 会把行程锁在一圈内，"
                           "写负目标位置舵机不动；把 9/11 号都写成 0（多圈绝对位置控制）"
-                          "之后负目标才会执行。microduck 有 4 个负角关节，因此初始化默认打开。",
+                          "之后负目标才会执行。microduck 整机有 4 个负角关节，装配时必须"
+                          "打开多圈；界面上默认关闭（台面单机调试一圈内更安全），"
+                          "取消勾选会把 9/11 号真的写回 0/4095，不是跳过。",
+        "unload_condition_addr": ADDR_UNLOAD_CONDITION,
+        "protect_bits": memory_table.PROTECT_BITS,
+        "protect_defaults": {
+            "voltage": provision.PROTECT_VOLTAGE_DEFAULT,
+            "over_current": provision.PROTECT_OVER_CURRENT_DEFAULT,
+        },
+        "protect_note": "19 号「卸载条件」位域：BIT0 电压保护、BIT1 磁编码、BIT2 过热、"
+                        "BIT3 过流保护，置 1 触发时舵机卸载（不输出扭矩）。"
+                        "工具只按读改写动 BIT0/BIT3，默认都关闭——"
+                        "关节中途卸力就是摔倒，这一取舍交给装配的人。",
         "total": len(provision.JOINTS),
     })
 
@@ -707,7 +738,13 @@ def api_provision():
                           0, provision.POSITION_GAIN_MAX)
     gain_kd = payload_int(data, "gain_kd", provision.POSITION_KD_DEFAULT,
                           0, provision.POSITION_GAIN_MAX)
-    multiturn = bool(data.get("multiturn", True))
+    # 多圈默认关闭：整机装配要打开，台面单机调试一圈内更安全。
+    # 注意 False 不是"跳过"，而是把 9/11 号写回单圈行程 0/4095。
+    multiturn = bool(data.get("multiturn", False))
+    protect_voltage = bool(data.get("protect_voltage",
+                                    provision.PROTECT_VOLTAGE_DEFAULT))
+    protect_over_current = bool(data.get("protect_over_current",
+                                         provision.PROTECT_OVER_CURRENT_DEFAULT))
     speed = payload_int(data, "speed", 60, -32767, 32767)
     acc = payload_int(data, "acc", 30, 0, 254)
     timeout_ms = float(data.get("timeout_ms", 100))
@@ -719,6 +756,8 @@ def api_provision():
         gain_kp=gain_kp,
         gain_kd=gain_kd,
         multiturn=multiturn,
+        protect_voltage=protect_voltage,
+        protect_over_current=protect_over_current,
         mode=mode,
         speed=speed,
         acc=acc,

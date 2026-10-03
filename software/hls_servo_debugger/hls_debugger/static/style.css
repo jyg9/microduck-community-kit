@@ -126,7 +126,8 @@ hr { border: none; border-top: 1px solid var(--line); margin: 15px 0; }
 .param-name .addr { color: var(--muted); font-family: var(--mono); font-size: 11px; margin-left: 5px; }
 .param-desc { color: #7f93aa; font-size: 11px; margin-top: 3px; }
 .param-input-wrap input, .param-input-wrap select { margin-top: 0; }
-.param-value { color: var(--muted); font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+/* 回读值列：允许换行，别把解析结果截断（原来是 nowrap + 窄列，长文本会被切掉） */
+.param-value { color: var(--muted); font-family: var(--mono); font-size: 12px; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
 .bit-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
 .bit-item { display: inline-flex; gap: 3px; align-items: center; background: #17202b; padding: 2px 5px; border: 1px solid #2c3c51; border-radius: 5px; font-size: 10px; color: #a9bdd4; }
 .bit-item input { width: auto; margin: 0; }
@@ -148,13 +149,25 @@ tr:hover td { background: #17202b; }
 }
 .prov-item:hover { border-color: #5f7fa8; }
 .prov-item.active { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(45,140,255,.18) inset; }
-.prov-item.done { border-color: #2b9e75; }
+/* 在线（点检/检测总线发现）：黄色；本页已完成初始化/校准：绿色 */
+.prov-item.online { border-color: var(--warn); background: rgba(244,185,66,.07); }
+.prov-item.online .prov-mark { color: var(--warn); }
+.prov-item.online .prov-badge { color: #e8c37a; }
+.prov-item.done { border-color: var(--ok); background: rgba(36,199,142,.10); }
+.prov-item.done .prov-mark { color: var(--ok); }
+.prov-item.done .prov-badge { color: #7fe0bb; }
 .prov-item.fail { border-color: #a34b53; }
 .prov-mark { font-family: var(--mono); font-size: 11px; color: var(--muted); min-width: 14px; text-align: center; }
-.prov-item.done .prov-mark { color: var(--ok); }
 .prov-item.fail .prov-mark { color: var(--danger); }
 .prov-name { flex: 1; }
 .prov-badge { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.prov-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 10px; font-size: 12px; color: var(--muted); }
+.prov-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.prov-legend-item::before { content: ""; width: 10px; height: 10px; border-radius: 3px; border: 1px solid var(--line); background: var(--panel-2); }
+.prov-legend-item.online::before { border-color: var(--warn); background: rgba(244,185,66,.25); }
+.prov-legend-item.done::before { border-color: var(--ok); background: rgba(36,199,142,.25); }
+.ok-mark { color: var(--ok); }
+.warn-state { color: var(--warn); }
 .prov-step { padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel-2); margin-bottom: 12px; font-size: 13px; }
 .prov-step b { color: #cfe3ff; }
 .prov-step ol { margin: 8px 0 0; padding-left: 18px; color: #bacee3; }

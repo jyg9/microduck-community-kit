@@ -46,6 +46,11 @@ ADDR_SECOND_ID = 7
 ADDR_RESPONSE_LEVEL = 8
 ADDR_MIN_ANGLE_LIMIT = 9
 ADDR_MAX_ANGLE_LIMIT = 11
+#: 19 号「卸载条件」位域：置 1 表示开启对应保护，触发时舵机卸载（卸力）。
+#: 完整位域见 memory_table.PROTECT_BITS（0 电压 / 1 磁编码 / 2 过热 / 3 过流）。
+ADDR_UNLOAD_CONDITION = 19
+UNLOAD_BIT_VOLTAGE = 0
+UNLOAD_BIT_OVER_CURRENT = 3
 #: 位置环 P/D 的 EEPROM 默认值，上电时分别加载进 50/51 两个 RAM 寄存器。
 ADDR_POSITION_KP_EPROM = 21
 ADDR_POSITION_KD_EPROM = 22
@@ -621,11 +626,24 @@ class HLSBus(object):
     def lock_eprom(self, servo_id):
         return self.write(servo_id, ADDR_LOCK, b"\x01")
 
-    def calibration_ofs(self, servo_id):
-        # 对应 HLSCL::CalibrationOfs()
+    def calibration_ofs(self, servo_id, save=True, timeout=None):
+        """对应 HLSCL::CalibrationOfs()：先关扭力、解锁 EPROM，再执行 CAL。
+
+        CAL 会把位置偏移(31 号)写掉，而 31 号在 EPROM 里：**只有解锁（55 号 = 0）
+        的时候写才会掉电保存**，所以解锁是必须的。
+
+        ``save=True``（默认）在 CAL 之后补一次写锁（55 号 = 1），把舵机恢复成
+        「EPROM 掉电不保存」的保护状态；CAL 本身已经写完并保存，上锁只是关掉
+        后续误写 EPROM 的入口，不会撤销这次校准。``save=False`` 则保持解锁，
+        方便连续做多次 CAL / 位置偏移调试。
+
+        返回 ``(CAL 应答帧, 上锁应答帧或 None)``。
+        """
         self.enable_torque(servo_id, 0)
         self.unlock_eprom(servo_id)
-        return self.recal(servo_id)
+        frame = self.recal(servo_id, timeout=timeout)
+        lock_frame = self.lock_eprom(servo_id) if save else None
+        return frame, lock_frame
 
     # ------------------------------------------------------------------
     # 高频读取辅助

@@ -311,13 +311,13 @@ def test_provision_fresh_servo_gets_its_joint_id():
 
 
 def test_provision_enables_multiturn_so_negative_angles_work():
-    """出厂 11 号 = 4095 会把负目标夹到 0；初始化必须把 9/11 号都写成 0。
+    """出厂 11 号 = 4095 会把负目标夹到 0；整机装配必须把 9/11 号都写成 0。
 
     真机实测：写完 0/0 之后写目标 −500，当前位置才真的变成 −500。
     """
     bus = fake_bus([1])
     assert bus._serial.servos[1]["max_limit"] == 4095
-    result = provision.Provisioner(bus).provision(22, calibrate="none")
+    result = provision.Provisioner(bus).provision(22, calibrate="none", multiturn=True)
     assert result["ok"], result["error"] + str(result["steps"])
     assert bus._serial.servos[22]["min_limit"] == 0
     assert bus._serial.servos[22]["max_limit"] == 0
@@ -325,6 +325,38 @@ def test_provision_enables_multiturn_so_negative_angles_work():
     # 关节表里确实有负角关节，这一步不是可有可无的。
     negative = [j["name"] for j in provision.JOINTS if j["home_counts"] < 0]
     assert "left_hip_pitch" in negative and len(negative) == 4
+
+
+def test_multiturn_defaults_to_off_single_turn_limits():
+    """多圈默认关闭，而且"关闭"是**真的写回单圈行程**，不是跳过不写。"""
+    assert provision.LIMITS_MULTITURN == (0, 0)
+    assert provision.LIMITS_SINGLE_TURN == (0, 4095)
+    bus = fake_bus([1])
+    result = provision.Provisioner(bus).provision(22, calibrate="none")
+    assert result["ok"], result["error"] + str(result["steps"])
+    assert result["multiturn"] is False
+    assert bus._serial.servos[22]["min_limit"] == 0
+    assert bus._serial.servos[22]["max_limit"] == 4095
+    assert result["snapshot"]["multiturn"] is False
+    names = [item["name"] for item in result["steps"]]
+    assert "关闭多圈，恢复单圈行程（9/11 号写 0/4095）" in names
+
+
+def test_provision_restores_single_turn_on_an_already_multiturn_servo():
+    """旧版"取消勾选 = 跳过"对已经开过多圈的舵机毫无作用，这里钉住修复。"""
+    bus = fake_bus([22], raw_position=100)
+    provisioner = provision.Provisioner(bus)
+    # 先打开多圈（模拟上次初始化留下的状态）
+    first = provisioner.provision(22, calibrate="none", mode="reinit", multiturn=True)
+    assert first["ok"], first["error"] + str(first["steps"])
+    assert bus._serial.servos[22]["max_limit"] == 0
+    # 再关掉：必须真的回到 0/4095
+    second = provisioner.provision(22, calibrate="none", mode="reinit", multiturn=False)
+    assert second["ok"], second["error"] + str(second["steps"])
+    assert bus._serial.servos[22]["min_limit"] == 0
+    assert bus._serial.servos[22]["max_limit"] == 4095
+    assert second["snapshot"]["multiturn"] is False
+    assert not [item for item in second["steps"] if not item["ok"]]
 
 
 def test_provision_can_keep_the_factory_single_turn_limit():
@@ -335,6 +367,62 @@ def test_provision_can_keep_the_factory_single_turn_limit():
     assert result["snapshot"]["multiturn"] is False
     assert "多圈位置控制" not in [item["name"] for item in result["steps"]
                                   if not item["ok"]]
+
+
+def test_unload_condition_is_read_modify_write_and_defaults_to_off():
+    """19 号只动 BIT0(电压)/BIT3(过流)，BIT1(磁编码)/BIT2(过热) 必须原样保留。"""
+    # 出厂/现状：BIT1+BIT2 打开（0b0110 = 6）
+    bus = fake_bus([1])
+    bus._serial.servos[1]["regs"][19] = 0b0110
+    result = provision.Provisioner(bus).provision(20, calibrate="none")
+    assert result["ok"], result["error"] + str(result["steps"])
+    # 默认两个保护都关闭：BIT0/BIT3 清零，BIT1/BIT2 保留
+    assert bus._serial.servos[20]["regs"][19] == 0b0110
+    assert result["protect"] == {"voltage": False, "over_current": False}
+    assert result["snapshot"]["protect_voltage"] is False
+    assert result["snapshot"]["protect_over_current"] is False
+
+    # 勾选两项：BIT0/BIT3 置位，BIT1/BIT2 仍然保留
+    bus = fake_bus([1])
+    bus._serial.servos[1]["regs"][19] = 0b0110
+    result = provision.Provisioner(bus).provision(
+        20, calibrate="none", protect_voltage=True, protect_over_current=True)
+    assert result["ok"], result["error"] + str(result["steps"])
+    assert bus._serial.servos[20]["regs"][19] == 0b1111
+    assert result["snapshot"]["protect_voltage"] is True
+    assert result["snapshot"]["protect_over_current"] is True
+
+    # 只勾电压：过流位保持 0，磁编码/过热不动
+    bus = fake_bus([1])
+    bus._serial.servos[1]["regs"][19] = 0b0110
+    result = provision.Provisioner(bus).provision(
+        20, calibrate="none", protect_voltage=True)
+    assert result["ok"], result["error"] + str(result["steps"])
+    assert bus._serial.servos[20]["regs"][19] == 0b0111
+
+
+def test_unload_condition_is_part_of_the_readback_check():
+    bus = fake_bus([1])
+    result = provision.Provisioner(bus).provision(
+        20, calibrate="none", protect_over_current=True)
+    assert result["ok"], result["error"] + str(result["steps"])
+    check = [item for item in result["steps"] if item["name"] == "回读校验"][0]
+    assert "卸载条件" in check["detail"]
+    assert "过流保护 开" in check["detail"]
+    assert result["snapshot"]["unload_condition"] == 1 << 3
+
+
+def test_calibration_ofs_can_save_and_relock():
+    """04 页 CAL：save=True 写完补上锁（55 号 = 1），save=False 保持解锁。"""
+    for save, expected_lock in ((True, 1), (False, 0)):
+        bus = fake_bus([10], raw_position=1234)
+        frame, lock_frame = bus.calibration_ofs(10, save=save)
+        assert frame.status == 0
+        assert bus._serial.servos[10]["regs"][55] == expected_lock, (save, expected_lock)
+        assert (lock_frame is not None) is save
+        # CAL 的语义：当前位置变成单圈中点 2048。
+        position = bus.read_word(10, 56)
+        assert decode_signed_magnitude(position, 15) == 2048
 
 
 def test_provision_cal_calibration_lands_on_the_2048_midpoint():
@@ -378,7 +466,8 @@ def test_offset_calibration_wraps_a_negative_home_angle_without_multiturn():
 def test_offset_calibration_is_exact_when_multiturn_is_on():
     """打开多圈后位置是有符号绝对值：差一整圈就是真差一圈，必须精确到位。"""
     bus = fake_bus([22], raw_position=100)
-    result = provision.Provisioner(bus).provision(22, calibrate="offset", mode="reinit")
+    result = provision.Provisioner(bus).provision(
+        22, calibrate="offset", mode="reinit", multiturn=True)
     assert result["ok"], result["error"] + str(result["steps"])
     assert result["snapshot"]["multiturn"] is True
     assert result["snapshot"]["position"] == -299, result["steps"][-1]["detail"]
@@ -420,7 +509,8 @@ def test_offset_calibration_offset_always_fits_the_register():
     """校准后的偏移始终落在 31 号 ±4095 的量程内，位置精确落在 home 角上。"""
     for raw in (0, 1, 2048, 3000):
         bus = fake_bus([22], raw_position=raw)
-        result = provision.Provisioner(bus).provision(22, calibrate="offset", mode="reinit")
+        result = provision.Provisioner(bus).provision(
+            22, calibrate="offset", mode="reinit", multiturn=True)
         assert result["ok"], (raw, result["error"], result["steps"])
         snap = result["snapshot"]
         assert abs(snap["position_offset"]) <= provision.OFFSET_LIMIT, (raw, snap)
@@ -429,9 +519,10 @@ def test_offset_calibration_offset_always_fits_the_register():
 
 def test_offset_calibration_restores_the_offset_instead_of_faking_it():
     """调不到目标时必须如实报失败，并把原来的偏移写回去，不留半校准状态。"""
-    # 编码器在 4095、目标 −299：一圈内没有能同时满足的偏移。
+    # 编码器在 4095、目标 −299：多圈下读数是有符号绝对值，差一圈就是真差一圈。
     bus = fake_bus([22], raw_position=4095)
-    result = provision.Provisioner(bus).provision(22, calibrate="offset", mode="reinit")
+    result = provision.Provisioner(bus).provision(
+        22, calibrate="offset", mode="reinit", multiturn=True)
     assert not result["ok"]
     detail = result["steps"][-1]["detail"]
     assert "没能把读数调到" in detail and "恢复" in detail, detail
@@ -513,7 +604,12 @@ def main():
     test_joint_table_matches_microduck()
     test_provision_fresh_servo_gets_its_joint_id()
     test_provision_enables_multiturn_so_negative_angles_work()
+    test_multiturn_defaults_to_off_single_turn_limits()
+    test_provision_restores_single_turn_on_an_already_multiturn_servo()
     test_provision_can_keep_the_factory_single_turn_limit()
+    test_unload_condition_is_read_modify_write_and_defaults_to_off()
+    test_unload_condition_is_part_of_the_readback_check()
+    test_calibration_ofs_can_save_and_relock()
     test_gain_default_is_the_vendors_value_not_robots_200()
     test_provision_writes_a_safe_position_gain()
     test_provision_gain_is_configurable_and_clamped()
