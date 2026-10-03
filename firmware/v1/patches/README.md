@@ -4,6 +4,22 @@
 SCS/HLS（HD-1910-C001），复用 `v1/patches/feetech.rs` 里那份已经写好并测试过的
 `feetech` 协议模块。
 
+> **快照声明（2026-10-02）。** 这份补丁是**移植完成那一刻**的样子，**不随本树更新**。基线固定在
+> 上游 `f0d934e`，`git apply` 到那棵树上仍然干净；但 `software/microduck_feetech/` 在那之后又做了
+> 三件事，所以**补丁已不再等于那棵树**：
+>
+> 1. **去掉每笔串口事务的 `flush()`**——`serialport` 的 `flush` 是 `tcdrain`，在这块板子上固定
+>    **~12 ms**（与帧长和有无应答都无关），控制环因此只有 36.3 Hz；删掉后回到 **50.0 Hz**。
+> 2. **`BURST_IDLE` 2 ms → 4 ms**（实测 13.5 万个相邻应答间隔的最大值是 1.94 ms，2 ms 只剩
+>    3% 余量）。
+> 3. **同步上游 `main` 的 10 个提交**，并在 `bus.rs` / `model.rs` / `robotd-design.md` 里留下三处
+>    `4656690`/`OFS_L` 的说明（上游那个会**写** EEPROM 的零点检查刻意没有带进来）。
+>
+> **冲突时以 `software/microduck_feetech/` 的代码为准**；补丁只用来回答"这次移植改了什么"。
+> 同一个文件集合：补丁口径 **16 文件 +2341/−622**，**本目录今天是 +2364/−623**（差在 `bus.rs`
+> +9、`model.rs` +8、`robotd-design.md` +6/−1）。**反向应用已经不干净**（恰好会在这三个文件上
+> 失败），所以别用它回到官方总线。
+
 - **基线**：上游 `pollen-robotics/microduck` `main` 的 `f0d934e`（2026-09-28）。上一版补丁的
   基线是 `5620aa2`（2026-09-08），两者相隔 1130 个提交，`duck-control/src/bus.rs` 与
   `robotd/src/main.rs` 都被上游改动过，因此补丁不是机械重放，而是按新代码重新移植
@@ -18,10 +34,11 @@ SCS/HLS（HD-1910-C001），复用 `v1/patches/feetech.rs` 里那份已经写好
 - **本机 `cargo test -p robotd` 有 2 个单测失败**（`an_unloadable_policy_holds_the_pose_and_
   reports_why`、`setting_a_skill_keeps_what_the_call_left_out`），原因是本机 ONNX Runtime /
   模型文件的差异（报错分别是 `/opt/robot/policies/current/velstand.onnx` 不存在、
-  `Protobuf parsing failed`），**不是本补丁**：把补丁反向应用回干净的 `f0d934e` 后，
-  这两个用例以同样的信息失败。
-- **补丁自检**：`git apply --check` 可干净应用到干净的 `f0d934e`；把它应用到干净副本后，
-  15 个文件与本目录的编辑结果**逐字节一致**（`cmp` 全部通过）。
+  `Protobuf parsing failed`），**不是本补丁**：在干净的 `f0d934e` 上不打补丁直接跑，这两个用例
+  以同样的信息失败。
+- **补丁自检**：`git apply --check` 可干净应用到干净的 `f0d934e`（2026-10-02 复核）；把它应用到
+  干净副本后，16 个文件里 **13 个**与本目录**逐字节一致**——另 3 个正是上面快照声明里的那三处
+  后续改动（`duck-control/src/bus.rs`、`duck-control/src/model.rs`、`docs/design/robotd-design.md`）。
 - `git diff --stat`：16 files changed, 2341 insertions(+), 622 deletions(-)
   （其中 `duck-control/src/feetech.rs` 为新增 556 行，SHA-256
   `0d3cfe86b4f80b689630f6fb3c39957d1e3940d8554a32d0c1122450cdea6c5a`，
@@ -277,7 +294,8 @@ SCS/HLS（HD-1910-C001），复用 `v1/patches/feetech.rs` 里那份已经写好
 **已验证（本机编译 + 单元测试，无硬件）**
 - `cargo test -p duck-control` **108 passed / 0 failed**；`cargo check -p duck-control -p robotd`
   通过、无新增 warning；`cargo test -p robotd-params` 通过。
-- 补丁 `git apply --check` 可干净应用到 `f0d934e`，应用结果与本目录编辑结果 15 个文件逐字节一致。
+- 补丁 `git apply --check` 可干净应用到 `f0d934e`；应用到干净副本后，16 个文件里 **13 个**与本目录
+  逐字节一致——另 3 个就是文首快照声明里的那三处后续改动（`bus.rs`、`model.rs`、`robotd-design.md`）。
 - `feetech` 模块 15 个协议测试通过，且模块文件与 `v1/patches/feetech.rs` 逐字节一致
   （SHA-256 见文首）。
 - 位置/速度/电流三种符号-幅值解码（含与 `i16` 结果的**不等**断言，避免测试蒙对）；

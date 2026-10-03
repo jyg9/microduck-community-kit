@@ -66,7 +66,8 @@
 
 **仍未在真硬件上验证的部分**：绝对 T_resp（要示波器/逻辑分析仪，宿主 USB 时间戳只到 ~0.3 ms）；
 本节点排在 `sync_read` ID 列表中间/末尾时的让位（运行时 200 固定第 0 位）；
-满槽 96 KB 升级与擦除中途掉电演练；主机侧 `robotd` 突发截断（见 `docs/bus_timing_borrow_plan.md §7.7`）。
+满槽 96 KB 升级与擦除中途掉电演练。（主机侧 `robotd` 突发截断曾列在此处，**2026-10-02 已修**：
+删 `tcdrain` + `BURST_IDLE` 2 → 4 ms，见 `docs/bus_timing_borrow_plan.md §7.7`。）
 
 ---
 
@@ -451,10 +452,12 @@ upgrade → VCMD_BOOT 进 bootloader → 分块写（块 CRC + 序号 + 回读�
 每 35.8 s 回绕（SysTick 重锁存，真 modulo-2^32）、`imu_spi.c` 的 SFLP 重启发布未收敛姿态
 （新增 CONVERGE 状态，1500 ms）。
 
-**开放项（主机侧，不是固件/接线）**：`robotd` 跑策略时约 17.5 s 的使能窗口里报 97 次
-（进程共 98 条）`sync_read: id(s) ... missing`，缺失集合总是回复到达顺序的尾部；直连同一总线的
-16 ID/150 次全完整，所以残余截断在 `duck-control/src/bus.rs` 的突发处理
-（`sync_read_blocks()` + `BURST_IDLE`/`pump()`）。详见 `docs/bus_timing_borrow_plan.md §7.7`。
+**曾记为开放项、2026-10-02 已修（主机侧，不是固件/接线）**：`robotd` 跑策略时约 17.5 s 的使能
+窗口里报 97 次（进程共 98 条）`sync_read: id(s) ... missing`，缺失集合总是回复到达顺序的尾部；
+直连同一总线的 16 ID/150 次全完整，所以截断在 `duck-control/src/bus.rs` 的突发处理。处置：删掉
+每笔事务的 `tcdrain`（实测固定 ~12 ms → 控制环 36.3 Hz 变 **50.0 Hz**），`BURST_IDLE` 2 → **4 ms**。
+残留的孤立掉读（0–3 次/5 分钟窗口）是散点而非后缀，与这个判据无关。
+详见 `docs/bus_timing_borrow_plan.md §7.7`。
 
 ## 9. 目录结构
 

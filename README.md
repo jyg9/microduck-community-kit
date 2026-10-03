@@ -11,7 +11,11 @@
 - **banana_pcb**：<a href="hardware/banana_pcb">电池上方的转接小板</a>
 - **dxl_hub**：<a href="hardware/dxl_hub">鸭鸭身体中的集线器板</a>
 - **飞特舵机调试软件**：<a href="software/hls_servo_debugger">飞特舵机调试软件</a>
+<<<<<<< HEAD
 - **microduck_feetech**：<a href="software/microduck_feetech">官方机器人软件（robotd 等）的飞特舵机适配版</a>——基于官方 `microduck` 仓库当前（`2026年10月2日`）打上飞特总线补丁的完整源码，可直接编译运行；
+=======
+- **microduck_feetech**：<a href="software/microduck_feetech">官方机器人软件（robotd 等）的飞特舵机适配版</a>——官方 `microduck` 的完整源码，基于 `f0d934e`（2026-09-28）打上飞特总线补丁，并在 2026-10-02 同步了上游 `main` 的 10 个提交，可直接编译运行；
+>>>>>>> 9f86f31 (wip: local changes before pull)
 
 接线图：
 ```text
@@ -61,7 +65,7 @@ git clone --recurse-submodules https://github.com/jyg9/microduck-community-kit.g
 ## 其他说明
  - 项目主要使用了中国国内易于采购的飞特1910舵机，同时兼容原版XL330
  - 本项目在Linux平台开发，不能保证其他平台兼容性
- - 硬件是纯手工绘制，软件全部由AI编写和调试
+ - 硬件是纯手工绘制，软件全部由AI编写和调试，已经消耗1G+ Token
  - imu_to_dxl如有需要，可在<a href="https://item.taobao.com/item.htm?ft=t&id=1085185543605">我的店铺</a>购买。
  - 如果觉得项目不错，欢迎小额打赏😀，或者点个星⭐再走？
 

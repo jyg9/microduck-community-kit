@@ -1,9 +1,10 @@
 # microduck + 飞特舵机（FeeTech SCS/HLS）适配说明
 
 这个目录是**官方 [microduck](https://github.com/pollen-robotics/microduck) 仓库的完整源码**
-（`main` 分支，基线提交 `f0d934e`，2026-09-28），上面已经打好了把电机总线从
-Dynamixel XL330 换成**飞特 HD-1910-C001（SCS/HLS 协议）**的补丁。可以直接编译、运行
-`robotd` 等程序，不需要再手工改一行代码。
+（`main` 分支，移植基线上游提交 `f0d934e`，2026-09-28），上面已经打好了把电机总线从
+Dynamixel XL330 换成**飞特 HD-1910-C001（SCS/HLS 协议）**的补丁；2026-10-02 又同步了上游
+`main` 的 10 个提交（见文末「已同步上游 `main`」）。可以直接编译、运行 `robotd` 等程序，
+不需要再手工改一行代码。
 
 配套硬件与固件（IMU 小板 `imu_to_dxl`）在本仓库的 <a href="../../hardware/imu_to_dxl">`hardware/imu_to_dxl`</a>、
 <a href="../../firmware/v1">`firmware/v1/`</a> 下。
@@ -11,7 +12,9 @@ Dynamixel XL330 换成**飞特 HD-1910-C001（SCS/HLS 协议）**的补丁。可
 ## 补丁在哪、怎么核对
 
 * 补丁本身：<a href="../../firmware/v1/patches/microduck-feetech.patch">`firmware/v1/patches/microduck-feetech.patch`</a>
-  （对上一条基线 `git apply` 可干净应用，反向亦可）
+  （对上一条基线 `f0d934e` 可干净应用。**它是移植当时的快照，已不等于本目录**——本目录后来又删了
+  `tcdrain`、把 `BURST_IDLE` 放宽到 4 ms，并同步了上游 `main`，所以**反向应用会在 3 个文件上失败，
+  别拿它回退到官方总线**；冲突时以本目录为准）
 * 逐文件说明、厂商寄存器依据、真机首跑记录、必须上真机确认的清单、未决事项：
   <a href="../../firmware/v1/patches/microduck_feetech_patch.md">`firmware/v1/patches/microduck_feetech_patch.md`</a>
 * 协议模块的单文件副本：<a href="../../firmware/v1/patches/feetech.rs">`firmware/v1/patches/feetech.rs`</a>
@@ -73,26 +76,33 @@ cargo test -p robotd-params             # 参数默认值（含增益）
 * 与上游的**行为差异**不止总线：增益默认值（`policy.gain`、`safety.gain_limp`、
   `safety.limp_fall_pose_gain`）也按飞特舵机改过，详见补丁说明第一节第 12 条。
 * 上游的 `docs/design/*.md` 里仍有按 XL330 叙述的段落，本目录只同步了协议与命名的部分，
-  未重写的范围在补丁说明未决事项 7 中列出；**冲突时以补丁说明为准**。
-* 需要回到官方总线时：在本目录里 `git apply -R ../../firmware/v1/patches/microduck-feetech.patch`
-  （补丁文件在本仓库的 `firmware/v1/patches/`，不在本目录内）。
+  未重写的范围在补丁说明未决事项 7 中列出；**冲突时以本目录代码为准**（补丁说明是移植当时的
+  快照，见 `firmware/v1/patches/microduck_feetech_patch.md` 顶部的快照声明）。
 
 ## 改动量：与上游逐文件对比
 
 方法：把上游基线 `f0d934e` 用 `git archive` 导出一份干净树，与本目录（去掉 `target/`、
 `dist/`、`staged/`、`build/` 等未跟踪产物）逐文件对比。
 
-**17 个文件，+2416 / −622 行**（2026-10-02 测量。这是**移植本身**）：
+三个口径要分开（2026-10-03 用 git 的 `--numstat` 复核，方法可复现）：
 
-> 当天那两处总线修复另占 2 个文件 **+39 / −39**，而且**行数净零**（`bus.rs` 改前改后都是
-> 1967 行），所以带着它们的树相对同一基线**仍然是 +2416 / −622**。这不是笔误：diff 的行数
-> 在三份版本之间不可相加——同一行被改两次，相对基线只算一次。
+| 口径 | 结果 |
+|---|---|
+| **补丁本身**（16 个文件，不含本页） | **+2341 / −622** ← 下表就是它 |
+| **本目录今天**，同样这 16 个文件 | **+2364 / −623** |
+| 本目录**整棵树** | **+2835 / −705，33 个文件**（= 上面 16 个 + 上游同步在补丁范围外的 16 个 + 本页） |
+
+差的 23 行全部落在 3 个文件上（`bus.rs` +9、`model.rs` +8、`robotd-design.md` +6/−1），内容就是
+`BURST_IDLE` 2 → 4 ms 的实测注释、`tcdrain` 删除的说明，以及同步上游时留下的
+`4656690`/`OFS_L` 三处注释。**补丁的行数与本目录的行数不可相互推导**：它停在移植完成的那一刻
+（见 `firmware/v1/patches/microduck_feetech_patch.md` 顶部的快照声明）。**下表是补丁的口径**
+（`bus.rs` 记 1621/397，本目录现在是 1630/397）：
 
 | 文件 | + | − | 性质 |
 |---|---|---|---|
 | `duck-control/src/bus.rs` | 1621 | 397 | 总线层重写（帧收发、时序） |
 | `duck-control/src/feetech.rs` | 556 | 0 | **新文件**：零依赖协议模块 |
-| `FORK.md` | 75 | 0 | 本页（测量时的行数） |
+| `FORK.md` | 75 | 0 | 本页（**不计入补丁**，测量时的行数） |
 | `duck-control/src/model.rs` | 48 | 49 | ID / 寄存器 / 出厂默认值 |
 | `docs/design/robotd-design.md` | 25 | 37 | 文档 |
 | `robotd-params/src/lib.rs` | 21 | 5 | 配置项 |
