@@ -41,7 +41,7 @@
 | **D6** | 身份寄存器 | 0/1 = **真实固件版本**；3/4 = **可辨认的自定义型号** `0x4D49`（'I','M'） | 【实测】真舵机 0/1 = 3.46、3/4 = `0x1F0A`；`0x0C00` 会被 FD 当成某种 STS | ✅ 已实施，真机读到 `1.0 / 0x4D49` |
 | **D7** | 校验和错误 | **静默丢弃**（保持现状） | 【实测】真舵机对坏校验帧完全不应答；我方 FeeTech 人格已一致（DXL 人格回 `ERR=0x20`，那是 DXL 的正确语义） | ✅ 已是行为，无改动 |
 | **D8** | 主机侧缺席/故障策略 | **快速失败**：burst 以"总线安静"结束（**当时定 2 ms，2026-10-02 按实测放宽到 4 ms**；不是 30 ms 串口超时），缺席/故障的 ID 在一条错误里列出来；**不做"沿用上次值并返回 Ok"** | 【读码】`robotd` 已经在读失败时 `coast.sample(None)`（沿用上一份好样本并计 `consecutive_errors`），所以"喂假数据"既没必要也不安全；要修的只是那 30 ms 卡顿与中途放弃 | ✅ 已实施（`software/microduck_feetech/duck-control/src/bus.rs`，`cargo test -p duck-control` 通过） |
-| **D9** | FeeTech `0x08` REBOOT | **节点实现**：不应答、`dev_request_reboot()`（应用与 bootloader 共用）；**主机补丁实现**：先写扭矩 0、发 `0x08`、**不等应答**立即返回 | 【实测】真机 fw 3.46：0x08 存在、不应答、**823 ms** 回来、EEPROM 设置全保留、RAM 增益回到 EEPROM（§1.7）——正好是 `RobotIo::reboot` 契约要的语义 | ✅ 固件已实施 + 单测；主机补丁见 `patches/microduck_feetech_patch.md` |
+| **D9** | FeeTech `0x08` REBOOT | **节点实现**：不应答、`dev_request_reboot()`（应用与 bootloader 共用）；**主机补丁实现**：先写扭矩 0、发 `0x08`、**不等应答**立即返回 | 【实测】真机 fw 3.46：0x08 存在、不应答、**823 ms** 回来、EEPROM 设置全保留、RAM 增益回到 EEPROM（§1.7）——正好是 `RobotIo::reboot` 契约要的语义 | ✅ 固件已实施 + 单测；主机补丁见 `patches/README.md` |
 
 | **D10** | Dynamixel `0x8A`（Fast Sync Read） | **节点实现聚合帧**：指令同 `0x82`；`LEN = 1 + N×(X+4)` 覆盖整包、每段 `ERR + ID + DATA + 累积 CRC`、**不填充**、第 0 台发 8 字节前缀；本机排第 k 位时**按前面 k 段的字节数**让位（`8 + k×(X+4)`），**不用 D2 的槽** | 【外部】ROBOTIS 手册 + 官方 32 字节示例，本机逐段 CRC 核过（`imu_to_dxl_protocol.md` §3.2.1）；【推算】一段只有 `(X+4)×10 µs`（X=12 → 160 µs），比 295 µs 的槽短，按槽让位必撞 | ✅ 已实施（`src/dxl2.c`、`src/bus.c`、`src/crc16.c`）；宿主逐字节测试 + 与 **rustypot 1.8 真解析器对拍**通过；真机三种位次全过（§7.8）；真 XL330 同总线未验证（§8） |
 
@@ -737,7 +737,7 @@ BUS_PORT=/dev/ttyACM1 ./build.sh smoke         # 传感器感知的协议冒烟�
   新增 4 组用例；`README.md`、`docs/dynamixel_slave.md`、`docs/flash_layout.md`（§9.6）、本文件。
 
 补丁（`v1/patches/`）：`microduck-feetech.patch` 重新生成（burst 2 ms 快速失败 + 故障不中断收集），
-`microduck_feetech_patch.md` 同步更新；`feetech.rs` 未改动。
+`patches/README.md` 同步更新；`feetech.rs` 未改动。
 
 ### 真机联调（2026-09-25，§4.6 / §7.6 / §7.7）
 
@@ -753,7 +753,7 @@ BUS_PORT=/dev/ttyACM1 ./build.sh smoke         # 传感器感知的协议冒烟�
 ### 补丁追平上游（2026-09-29）
 
 上游 `microduck` 从补丁基线 `5620aa2`（2026-09-08）前进到 `f0d934e`（2026-09-28，1130 个提交），
-补丁按新基线重新生成并重做移植；详见 `patches/microduck_feetech_patch.md`，要点：
+补丁按新基线重新生成并重做移植；详见 `patches/README.md`，要点：
 
 * **保留上游新增功能**：替代舵机自动收养（`missing_servos`/`replacement_target`/
   `adopt_replacement`）、`bus.fast_sync_read` 键（在飞特总线上无效果，登记表与文档已写明）；
@@ -773,7 +773,7 @@ BUS_PORT=/dev/ttyACM1 ./build.sh smoke         # 传感器感知的协议冒烟�
 ### 真机首跑（2026-09-30，15 舵机 + IMU 节点）
 
 第一次把打补丁的 `robotd` 跑在真机上（`/dev/ttyACM0`，速度策略 `2026-09-04_22-59-06_velocity.onnx`）。
-完整记录见 `patches/microduck_feetech_patch.md` 第六节，要点：
+完整记录见 `patches/README.md` 第六节，要点：
 
 * 跑通的：`check_registers` 15/15、50 Hz 环路 3858 ticks / 0 missed、策略加载、`robot init`
   归位、**15 个关节实测≈目标（最大偏差 0.02 rad）**——位置标度（4096 counts/圈）与符号-幅值

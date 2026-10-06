@@ -4,7 +4,7 @@
 //! This module is deliberately dependency-free: it is pure framing and
 //! conversion code with unit tests, so it can be dropped into `duck-control`
 //! (or any other crate) without pulling anything in. See
-//! `firmware/v1/patches/microduck_feetech_patch.md` for how `bus.rs`
+//! `firmware/v1/patches/README.md` for how `bus.rs`
 //! uses it, and `飞特通讯协议/飞特通讯协议说明.md` for the protocol write-up.
 //!
 //! Frame layout (all little endian for multi-byte fields):

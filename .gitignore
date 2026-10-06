@@ -46,9 +46,12 @@ Release/
 *.lst
 *.su
 *.d
-# `*.d` 同时匹配以 `.d` 结尾的**目录**，会吃掉 systemd 的 sysusers.d / journald.conf.d。
+# `*.d` 同时匹配以 `.d` 结尾的**目录**，会吃掉 systemd 的 sysusers.d / journald.conf.d，
+# 以及单元的 drop-in 目录（`<unit>.service.d` / `<unit>.timer.d`）。
 !sysusers.d/
 !*.conf.d/
+!*.service.d/
+!*.timer.d/
 *.pdb
 
 # ===== 日志 / 临时文件 =====

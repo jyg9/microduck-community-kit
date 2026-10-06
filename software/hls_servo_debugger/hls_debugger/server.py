@@ -12,6 +12,7 @@ from __future__ import absolute_import
 import argparse
 import glob
 import os
+import stat
 import threading
 import time
 import webbrowser
@@ -72,6 +73,50 @@ def payload():
     if data is None:
         data = {}
     return data
+
+
+def _proc_name(pid):
+    try:
+        with open("/proc/%d/comm" % pid, "r") as handle:
+            return handle.read().strip()
+    except Exception:
+        return "?"
+
+
+def port_holders(device):
+    """哪些**别的**进程正开着这个串口设备。
+
+    为什么需要它：`robotd` 用 `TIOCEXCL` 打开 `/dev/ttyS2`，但那个排他标志只挡没有
+    `CAP_SYS_ADMIN` 的进程——两个 root 进程（robotd 与这个调试工具）可以同时打开同一个
+    tty，实测如此（2026-10-05，Armbian 26.8.1 / radxa-zero3）。两边各读走一半字节的现象是
+    "每个 tick 随机丢几个舵机"，看起来像节点坏了，很难查到根因。所以这里自己查
+    `/proc/<pid>/fd`，发现占用就拒绝连接，而不是"连上了但读出来是乱的"。
+    """
+    try:
+        dev = os.stat(device)
+    except OSError:
+        return []
+    if not stat.S_ISCHR(dev.st_mode):
+        return []
+    holders = []
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit() or int(entry) == os.getpid():
+            continue
+        pid = int(entry)
+        fd_dir = "/proc/%d/fd" % pid
+        try:
+            fds = os.listdir(fd_dir)
+        except OSError:
+            continue
+        for fd in fds:
+            try:
+                target = os.stat(os.path.join(fd_dir, fd))
+            except OSError:
+                continue
+            if stat.S_ISCHR(target.st_mode) and target.st_rdev == dev.st_rdev:
+                holders.append({"pid": pid, "name": _proc_name(pid)})
+                break
+    return holders
 
 
 def payload_int(data, key, default=None, minimum=None, maximum=None):
@@ -186,12 +231,15 @@ def api_ports():
                     "description": item.description or "",
                     "hwid": item.hwid or "",
                 })
-    for pattern in ("/dev/ttyACM*", "/dev/ttyUSB*", "/dev/ttyTHS*", "/dev/ttyAMA*"):
+    # 机器鸭核心板的舵机总线是 UART（robotd.toml 的 bus.port = /dev/ttyS2），不是 USB CDC，
+    # 所以光靠 pyserial 的 comports() 找不到它，得像 ttyACM 一样自己列出来。
+    for pattern in ("/dev/ttyACM*", "/dev/ttyUSB*", "/dev/ttyTHS*", "/dev/ttyAMA*",
+                    "/dev/ttyS2", "/dev/ttyS*"):
         for device in sorted(glob.glob(pattern)):
             if device not in seen:
                 seen.add(device)
                 ports.append({"device": device, "description": "检测到串口设备", "hwid": ""})
-    for device in (DEFAULT_PORT, "/dev/ttyUSB0", "/dev/ttyACM0"):
+    for device in (DEFAULT_PORT, "/dev/ttyS2", "/dev/ttyUSB0", "/dev/ttyACM0"):
         if device not in seen:
             ports.append({"device": device, "description": "默认候选", "hwid": ""})
     return ok({"ports": ports, "default_port": DEFAULT_PORT})
@@ -236,6 +284,20 @@ def api_connect():
     port = data.get("port") or DEFAULT_PORT
     baudrate = int(data.get("baudrate") or data.get("baud") or DEFAULT_BAUD)
     timeout_ms = float(data.get("timeout_ms", 100))
+    # 总线上已经有别人（通常就是 robotd）在跑：TIOCEXCL 拦不住 root，所以这里自己拦。
+    # `allow_shared: true` 是想强制连的时候的逃生门（例如只想旁听看一眼），
+    # 但两边会互相吃掉对方的应答帧，读数不可信。
+    holders = port_holders(port)
+    if holders and not data.get("allow_shared"):
+        who = "、".join("%s (pid %d)" % (h["name"], h["pid"]) for h in holders)
+        return fail(
+            "串口 %s 已经被 %s 占着：两个进程同时读写会互相吃掉应答帧，"
+            "现象是每个 tick 随机丢几个舵机、看起来像节点坏了。"
+            "先让出总线（核心板上：sudo systemctl stop robotd），再连接。" % (port, who),
+            code="port_busy",
+            status_code=409,
+            holders=holders,
+        )
     status = bus.connect(port, baudrate, timeout=max(0.01, timeout_ms / 1000.0))
     return ok(status)
 
@@ -675,19 +737,28 @@ def api_joints():
                      % provision.POSITION_KP_DEFAULT,
         "position_wrap": provision.POSITION_WRAP,
         "position_tolerance": provision.POSITION_TOLERANCE,
-        "position_note": "实测本机：位置(56) ≡ 编码器值 − 位置偏移(31) (mod 4096)；"
-                         "负值有时回绕成 0~4095、有时带 BIT15 报负值，"
-                         "所以校准按一圈取模比较并留 %d 计数容差。"
-                         % provision.POSITION_TOLERANCE,
+        "position_center": provision.POSITION_CENTER,
+        "position_direction": provision.POSITION_DIRECTION,
+        "position_note": "关节角零点在 **2048 计数**（单圈行程的中点）、方向 = **%+g**"
+                         "（`duck-control/src/feetech.rs` 的 POSITION_CENTER / "
+                         "POSITION_DIRECTION，后者是 2026-10-03 手转实测）："
+                         "关节角 = 方向 · (计数 − 2048) · 2π/4096，位置字段是干净的 0..4095。"
+                         "所以关节表给两个数：`home_counts` 是 home 姿态角的计数表示（可负），"
+                         "`home_count` = 2048 + 方向 × home_counts 才是写到 42/56 号字段里的值"
+                         "（方向 −1：left_hip_pitch 的 −299 → 2347）。"
+                         "「转到中位」写 2048、「按 home 姿态写偏移」的目标是 home_count。"
+                         % provision.POSITION_DIRECTION,
         "multiturn_default": False,
         "multiturn_limits": {
             "on": list(provision.LIMITS_MULTITURN),
             "off": list(provision.LIMITS_SINGLE_TURN),
         },
-        "multiturn_note": "实测本机：出厂 11 号最大角度限制 = 4095 会把行程锁在一圈内，"
-                          "写负目标位置舵机不动；把 9/11 号都写成 0（多圈绝对位置控制）"
-                          "之后负目标才会执行。microduck 整机有 4 个负角关节，装配时必须"
-                          "打开多圈；界面上默认关闭（台面单机调试一圈内更安全），"
+        "multiturn_note": "实测本机：出厂 11 号最大角度限制 = 4095 把位置字段锁在一圈 "
+                          "0..4095 内，写**负数**目标位置会被夹到 0、舵机不动。"
+                          "整机现在按单圈跑：零点 2048、方向 −1，负的关节角在字段里表现为 "
+                          "2048 以上的计数（left_hip_pitch 的 −299 → 2347），所以不需要多圈。"
+                          "打开多圈（9/11 号写 0/0）只在台面上要转到一圈以外、或要写有符号"
+                          "绝对值时才用，代价是固件不再限制行程。"
                           "取消勾选会把 9/11 号真的写回 0/4095，不是跳过。",
         "unload_condition_addr": ADDR_UNLOAD_CONDITION,
         "protect_bits": memory_table.PROTECT_BITS,
@@ -786,16 +857,29 @@ def api_memory_map():
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="HLS 舵机浏览器调试工具")
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="监听地址。核心板上要让局域网里的浏览器连进来就用 0.0.0.0")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--serial", default=None,
+                        help="默认串口设备。核心板上是 /dev/ttyS2（robotd.toml 的 bus.port），"
+                             "台面调试器一般是 /dev/ttyACM1。也可以用环境变量 DUCK_SERVO_PORT。")
     parser.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
     parser.add_argument("--debug", action="store_true", help="Flask 调试模式")
     args = parser.parse_args(argv)
+
+    # 页面里"默认串口"这一项来自 DEFAULT_PORT，所以要在起服务之前定下来：命令行优先于
+    # 环境变量，环境变量优先于内置默认值（台面那台 /dev/ttyACM1）。
+    global DEFAULT_PORT
+    DEFAULT_PORT = args.serial or os.environ.get("DUCK_SERVO_PORT") or DEFAULT_PORT
 
     url = "http://%s:%s/" % (args.host, args.port)
     if not args.no_browser:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     print("HLS 舵机调试工具已启动：%s" % url)
+    print("默认串口：%s（可在页面上改）" % DEFAULT_PORT)
+    if args.host not in ("127.0.0.1", "localhost"):
+        print("注意：它能让任何能连到 %s:%s 的人给舵机写寄存器，只在可信任的局域网里开。"
+              % (args.host, args.port))
     app.run(host=args.host, port=args.port, debug=args.debug, threaded=True)
 
 

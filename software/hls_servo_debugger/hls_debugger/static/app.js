@@ -142,6 +142,14 @@
     });
     if (data.default_port) select.value = data.default_port;
     if (!select.value && select.options.length) select.selectedIndex = 0;
+    // 提示里写服务端真正的默认串口：核心板是 /dev/ttyS2，台面是 /dev/ttyACM1。
+    if (data.default_port) {
+      S.defaultPort = data.default_port;
+      if (!S.connected) {
+        $("appHint").textContent =
+          "默认 " + data.default_port + " @ 1 Mbps，舵机 ID 1";
+      }
+    }
   }
 
   function renderBaudSelect() {
@@ -167,7 +175,7 @@
     $("connDot").className = "dot " + (on ? "dot-on" : "dot-off");
     $("connText").textContent = on ? "已连接" : "未连接";
     $("connMeta").textContent = on ? (data.port + " @ " + data.baudrate) : "";
-    $("appHint").textContent = on ? ("端口 " + data.port + "，超时 " + Math.round(data.timeout * 1000) + " ms") : "默认 /dev/ttyACM1 @ 1 Mbps，舵机 ID 1";
+    $("appHint").textContent = on ? ("端口 " + data.port + "，超时 " + Math.round(data.timeout * 1000) + " ms") : ("默认 " + (S.defaultPort || "/dev/ttyACM1") + " @ 1 Mbps，舵机 ID 1");
     $("btnConnect").disabled = on;
     $("btnDisconnect").disabled = !on;
     $("btnTopDisconnect").disabled = !on;
@@ -882,6 +890,7 @@
     S.prov.imuBusId = data.imu_bus_id !== undefined ? data.imu_bus_id : 200;
     S.prov.positionWrap = data.position_wrap || 4096;
     S.prov.positionNote = data.position_note || "";
+    S.prov.positionCenter = data.position_center !== undefined ? data.position_center : 2048;
     S.prov.jointOrderNote = data.joint_order_note || "";
 
     const select = $("provCalibrate");
@@ -945,8 +954,8 @@
       const stateText = status === "done" ? "本页已完成初始化/校准"
         : (status === "fail" ? "本页初始化失败"
           : (online ? "在线（未在本页初始化）" : "未检测到应答"));
-      item.title = joint.group + " · home " + joint.home_deg + "° (" +
-        joint.home_counts + " 计数) · " + stateText;
+      item.title = joint.group + " · home " + joint.home_deg + "° (关节角 " +
+        joint.home_counts + " 计数 → 舵机字段 " + joint.home_count + ") · " + stateText;
       item.addEventListener("click", () => {
         if (S.prov.busy) return;
         S.prov.index = index;
@@ -971,12 +980,11 @@
     const done = Object.keys(S.prov.status).filter((k) => S.prov.status[k] === "done").length;
     const fresh = provMode() === "fresh";
     const source = fresh ? S.prov.factoryId : joint.id;
-    const wrapped = ((joint.home_counts % S.prov.positionWrap) + S.prov.positionWrap) % S.prov.positionWrap;
     const lines = [];
     lines.push("<b>" + (S.prov.index + 1) + "/" + S.prov.joints.length + " · " + joint.name +
       "</b>（" + joint.group + "，目标 ID <b>" + joint.id + "</b>，home 姿态 " +
-      joint.home_deg + "° = " + joint.home_counts + " 计数" +
-      (wrapped !== joint.home_counts ? "，读数上回绕为 " + wrapped + " 计数" : "") + "）");
+      joint.home_deg + "° = 关节角 " + joint.home_counts + " 计数 → 舵机字段 <b>" +
+      joint.home_count + "</b> 计数）");
     if (fresh) {
       lines.push("<ol>" +
         "<li>总线上只接这<b>一个</b>新舵机，其余可以留着；确认它已上电。</li>" +
@@ -1096,25 +1104,24 @@
       ? "出厂 ID " + S.prov.factoryId + " 的新舵机" : "ID " + joint.id + " 的舵机") +
       "初始化为「" + joint.name + "」（ID " + joint.id + "）。\n" +
       "校准方式：" + (meta ? meta.name : "无") + "\n";
-    if (meta && meta.id === "mid") confirmText += "舵机会转到位置 0 并保持扭矩。\n";
+    if (meta && meta.id === "mid") {
+      confirmText += "舵机会转到位置 " + (S.prov.positionCenter || 2048) +
+        "（关节角 0，一圈的中点）并保持扭矩。\n";
+    }
     if (meta && meta.id === "cal") confirmText += "舵机会执行 CAL，当前位置将成为中点。\n";
     if (meta && meta.id === "offset") {
-      confirmText += "将把 31 号位置偏移改成本关节的 home 姿态（" + joint.home_deg + "°）。\n";
+      confirmText += "将把 31 号位置偏移改成「此刻读数 = 本关节 home 姿态」：" +
+        joint.home_deg + "° → 目标 " + joint.home_count + " 计数（2048 " +
+        (joint.direction < 0 ? "−" : "+") + " " + Math.abs(joint.home_counts) +
+        "，方向 " + (joint.direction < 0 ? "−1" : "+1") + "）。\n";
     }
     if ($("provMultiturn").checked) {
-      if (joint.home_counts < 0) {
-        confirmText += "本关节 home 角是负的（" + joint.home_counts +
-          " 计数），需要多圈位置控制；这一步会把 9/11 号角度限制写成 0。\n";
-      } else {
-        confirmText += "会把 9/11 号角度限制写成 0（打开多圈，取消固件行程限制）。\n";
-      }
+      confirmText += "会把 9/11 号角度限制写成 0（打开多圈，取消固件行程限制）——" +
+        "整机现在按单圈跑，只有台面上要转到一圈以外时才需要打开。\n";
     } else {
-      confirmText += "会把 9/11 号角度限制写成 0/4095（单圈行程）。";
-      if (joint.home_counts < 0) {
-        confirmText += "注意：本关节 home 角是负的（" + joint.home_counts +
-          " 计数），单圈行程下负目标会被夹到 0，这颗关节装好后到不了 home 姿态。";
-      }
-      confirmText += "\n";
+      confirmText += "会把 9/11 号角度限制写成 0/4095（单圈行程）。" +
+        "整机就是这个配置：负的关节角在字段里表现为 2048 以上的计数" +
+        "（例如 left_hip_pitch 的 −299 → 2347），不会被夹到 0。\n";
     }
     const protectOn = [];
     if ($("provProtectVoltage").checked) protectOn.push("电压保护");
@@ -1192,9 +1199,9 @@
       const c = data.calibration;
       lines.push("");
       lines.push("位置偏移校准：读数 " + c.position_before + " → " + c.position_after +
-        " 计数；目标 " + c.target_counts + " 计数 = " + c.target_deg + "°" +
-        (c.target_wrapped !== undefined && c.target_wrapped !== c.target_counts
-          ? "（读数按一圈回绕为 " + c.target_wrapped + "）" : "") + "。");
+        " 计数；目标 " + c.target_counts + " 计数（关节角 " +
+        (c.target_joint_counts !== undefined ? c.target_joint_counts : c.target_counts) +
+        "）= " + c.target_deg + "°。");
     }
     if (data.calibration && data.calibration.mode === "mid") {
       lines.push("");
@@ -1223,7 +1230,10 @@
     }
     box.innerHTML = [
       provMetric("ID", snap.id_read, "期望 " + snap.id),
-      provMetric("位置", snap.position + " 计数", snap.position_deg + "° · 0.087°/计数"),
+      provMetric("位置", (snap.position_counts !== undefined ? snap.position_counts : snap.position) + " 计数",
+        "关节角 " + (snap.joint_deg !== undefined ? snap.joint_deg + "°" :
+          (snap.position_counts !== undefined ? (snap.position_counts - 2048) * 0.087 : "?") + "°") +
+        " · 零点 " + (S.prov.positionCenter || 2048)),
       provMetric("位置偏移", snap.position_offset, "31 号寄存器"),
       provMetric("波特率", snap.baud_code, (S.prov.baudNames && S.prov.baudNames[snap.baud_code]) || ""),
       provMetric("锁标志", snap.lock, snap.lock === 1 ? "EPROM 掉电不保存" : "EPROM 掉电保存"),
@@ -1231,7 +1241,8 @@
       provMetric("模式", snap.mode, (S.modeNames && S.modeNames[snap.mode]) || ""),
       provMetric("多圈位置控制", snap.multiturn ? "已打开" : "已关闭",
         "9/11 号 = " + snap.min_angle_limit + "/" + snap.max_angle_limit +
-        (snap.multiturn ? " · 负关节角可用" : " · 单圈行程，负目标会被夹到 0")),
+        (snap.multiturn ? " · 有符号绝对值，可转到一圈以外"
+                        : " · 整机配置：单圈 0..4095，零点 2048、方向 −1")),
       provMetric("19 号卸载条件",
         snap.unload_condition + " (0x" + Number(snap.unload_condition).toString(16).toUpperCase().padStart(2, "0") + ")",
         protectText(snap)),

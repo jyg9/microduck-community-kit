@@ -7,6 +7,10 @@
 
 from __future__ import absolute_import
 
+import os
+import re
+import subprocess
+import sys
 import time
 
 from . import provision
@@ -127,6 +131,14 @@ class FakeServoSerial(object):
                 "max_limit": 4095,
                 "regs": {0: 3, 1: 46, 2: 0, 3: 10, 4: 31, 5: sid,
                          6: 0, 7: 253, 8: 1, 33: 4, 40: 0, 41: 0,
+                         # 相位 18 号。**真机出厂是 0x34**（bit 4 角度反馈 = 全角度、
+                         # bit 2 驱动桥方向、bit 5 集成 H 桥，15 个舵机一致，2026-10-05
+                         # 实测），此时位置读数不会自己回绕。这里默认 0（单圈反馈）
+                         # 是因为下面那些记录的用例（CAL 之后读数 2048 等）是在"读数会被
+                         # 折进一圈"的前提下量出来的；要测真机那一档，用例里显式写
+                         # `servo["regs"][18] = 0x34`，见
+                         # test_provision_rewinds_an_out_of_turn_reading_without_moving_the_joint。
+                         18: 0,
                          # 出厂 EPROM 位置环 P/D = 32/40，上电加载进 RAM 50/51
                          # （真机回读确认，见 provision.POSITION_KP_DEFAULT）。
                          21: 32, 22: 40, 50: 32, 51: 40,
@@ -184,13 +196,24 @@ class FakeServoSerial(object):
         """9/11 号都为 0 = 多圈绝对位置控制；否则行程被夹在一圈内。"""
         return servo["min_limit"] == 0 and servo["max_limit"] == 0
 
+    def _full_angle_feedback(self, servo):
+        """18 号相位 bit 4：角度反馈模式（0 单圈 / 1 全角度）。
+
+        真机实测（2026-10-05，HD-1910-C001 / 固件 3.46）：**出厂 18 号 = 0x34，
+        bit 4 = 1，15 个舵机完全一致**。这一位打开时位置读数**不会自己回绕**，
+        即使 9/11 号是单圈的 0/4095：关节被手推过一整圈之后 56 号会读到 4096 以上
+        （实测 ``head_yaw`` = **6289**）。robotd 的驱动层只读单圈字段，超出的读数
+        会被取模屏蔽 —— 看上去"到位"，其实差着一整圈，下一次写目标就把关节转回去。
+        """
+        return bool(servo["regs"].get(18, 0) & 0x10)
+
     def _position(self, servo):
         if self.invert_convention:
             delta = servo["raw_position"] + servo["offset"]
         else:
             delta = servo["raw_position"] - servo["offset"]
-        if self._multiturn(servo):
-            return delta           # 多圈：真正的有符号绝对值，可超出 0~4095
+        if self._multiturn(servo) or self._full_angle_feedback(servo):
+            return delta           # 多圈 / 全角度反馈：有符号绝对值，可超出 0~4095
         return delta % 4096        # 一圈内：固件把负结果回绕成 0~4095
 
     def _offset_for(self, servo, position):
@@ -268,6 +291,50 @@ def fake_bus(ids, raw_position=1234, invert_convention=False):
     bus.connected = True
     bus.timeout = 0.02
     return bus
+
+
+def _rust_source(name):
+    """仓库里那份 Rust 源码，找不到就返回 None。
+
+    本工具也会被单独拷到机器鸭核心板上跑（那里没有 Rust 树），所以与源码对拍的那两条
+    用例必须在缺文件时**跳过**而不是失败——否则板子上的 selftest 永远过不了。
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.abspath(os.path.join(here, "..", "..", ".."))
+    for relative in (
+        os.path.join("software", "microduck_feetech", "duck-control", "src", name),
+        os.path.join("duck-control", "src", name),
+    ):
+        path = os.path.join(root, relative)
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def test_position_direction_matches_the_driver():
+    """`POSITION_DIRECTION` / `POSITION_CENTER` 必须与 duck-control 的驱动层一致。
+
+    这是本工具唯一一个能"静默地把 15 个关节全对到镜像位置"的常量，所以它不能只靠注释。
+    读的是源码文本（`feetech.rs` 的 `pub const`），和 `cargo test` 无关。
+    """
+    path = _rust_source("feetech.rs")
+    if path is None:
+        print("  (跳过：找不到 feetech.rs，本机只有调试工具)")
+        return
+    with open(path, "r", encoding="utf-8") as handle:
+        text = handle.read()
+
+    def const(name):
+        match = re.search(
+            r"pub const %s\s*:\s*[A-Za-z0-9_]+\s*=\s*(-?[0-9]+(?:\.[0-9]+)?)" % name, text)
+        assert match, "feetech.rs 里找不到 %s" % name
+        return float(match.group(1))
+
+    assert const("POSITION_CENTER") == provision.POSITION_CENTER, (
+        "调试工具的 POSITION_CENTER 与 feetech.rs 不一致")
+    assert const("POSITION_DIRECTION") == provision.POSITION_DIRECTION, (
+        "调试工具的 POSITION_DIRECTION 与 feetech.rs 不一致："
+        "drift 会让关节表整列镜像（见 provision.py 顶部）")
 
 
 def test_joint_table_matches_microduck():
@@ -437,40 +504,78 @@ def test_provision_cal_calibration_lands_on_the_2048_midpoint():
     assert (result["snapshot"]["position_offset"] - (1234 - 2048)) % 4096 == 0
 
 
+def test_joint_table_carries_both_the_angle_and_the_servo_count():
+    """关节角计数（可负）与要写到舵机上的计数（0..4095，2048 = 关节角 0）必须都对。
+
+    这两个数混起来就是整机装歪：`home_counts` 是 model.rs 的 DEFAULT_POSITION，
+    `home_count` 才是 42/56 号字段里的值。两者之间还夹着一个**方向**（feetech.rs 的
+    `POSITION_DIRECTION = −1`，实测），所以 `home_count ≠ 2048 + home_counts`——
+    left_hip_pitch 的 −299 计数对应 **2347**，不是 1749。
+    """
+    assert provision.POSITION_CENTER == 2048
+    assert provision.POSITION_DIRECTION == -1.0
+    expected = {
+        "left_hip_yaw": 0, "left_hip_roll": -57, "left_hip_pitch": -299,
+        "left_knee": -3, "left_ankle": 295, "neck_pitch": 228, "head_pitch": 228,
+        "head_yaw": 0, "head_roll": 0, "mouth": 0, "right_hip_yaw": 0,
+        "right_hip_roll": 57, "right_hip_pitch": 299, "right_knee": 3,
+        "right_ankle": -295,
+    }
+    for joint in provision.JOINTS:
+        counts = expected[joint["name"]]
+        assert joint["home_counts"] == counts, joint["name"]
+        assert joint["direction"] == provision.POSITION_DIRECTION, joint["name"]
+        assert joint["home_count"] == int(round(
+            provision.POSITION_CENTER + counts / provision.POSITION_DIRECTION)), joint["name"]
+        assert 0 <= joint["home_count"] <= 4095, joint["name"]
+    # 举两个具体的：髋俯仰的 home 角是 −0.4579 rad（−299 计数），方向 −1 →
+    # 舵机字段值 **2347**（旧表写的 1749 是镜像位置）；右踝的 +295 计数 → 1753。
+    by_name = {j["name"]: j for j in provision.JOINTS}
+    assert by_name["left_hip_pitch"]["home_count"] == 2347
+    assert by_name["right_hip_pitch"]["home_count"] == 1749
+    assert by_name["left_ankle"]["home_count"] == 1753
+    assert by_name["right_ankle"]["home_count"] == 2343
+    assert by_name["left_hip_yaw"]["home_count"] == 2048
+    # 头颈两个 +20° 的关节：2048 − 228 = 1820。
+    assert by_name["neck_pitch"]["home_count"] == 1820
+    assert by_name["head_pitch"]["home_count"] == 1820
+
+
 def test_provision_offset_calibration_hits_the_home_pose():
     bus = fake_bus([1], raw_position=1234)
     result = provision.Provisioner(bus).provision(20, calibrate="offset")
     assert result["ok"], result["error"] + str(result["steps"])
-    # right_hip_yaw 的 home 姿态是 0 计数。
-    assert result["calibration"]["target_counts"] == 0
-    assert result["calibration"]["position_after"] == 0
-    assert result["snapshot"]["position"] == 0
-    assert (result["snapshot"]["position_offset"] - 1234) % 4096 == 0
+    # right_hip_yaw 的 home 姿态角是 0，也就是舵机的 2048。
+    assert result["calibration"]["target_counts"] == provision.POSITION_CENTER
+    assert result["calibration"]["target_joint_counts"] == 0
+    assert result["calibration"]["position_after"] == provision.POSITION_CENTER
+    assert result["snapshot"]["position"] == provision.POSITION_CENTER
+    assert result["snapshot"]["joint_counts"] == 0
+    assert (result["snapshot"]["position_offset"] - (1234 - 2048)) % 4096 == 0
 
 
 def test_offset_calibration_wraps_a_negative_home_angle_without_multiturn():
-    """没打开多圈时位置被夹在一圈内：负 home 角表现为 4096+角，校准要按取模判等。
-
-    这正是出厂设置下的真实行为，也是"负角关节不到位"的原因。
-    """
+    """单圈字段里位置就是 0..4095：方向 −1 时负 home 角表现为 2048+|角|，判等要按取模。"""
     bus = fake_bus([22], raw_position=100)
     result = provision.Provisioner(bus).provision(
         22, calibrate="offset", mode="reinit", multiturn=False)
     assert result["ok"], result["error"] + str(result["steps"])
-    # left_hip_pitch 的 home 是 −299 计数，一圈内表现为 3797。
-    assert result["calibration"]["target_counts"] == -299
-    assert result["snapshot"]["position"] == 3797
+    # left_hip_pitch 的 home 角是 −299 计数，方向 −1 → 舵机字段值 2347。
+    assert result["calibration"]["target_counts"] == 2347
+    assert result["calibration"]["target_joint_counts"] == -299
+    assert result["snapshot"]["position"] == 2347
+    assert result["snapshot"]["joint_counts"] == -299
     assert result["snapshot"]["multiturn"] is False
 
 
 def test_offset_calibration_is_exact_when_multiturn_is_on():
-    """打开多圈后位置是有符号绝对值：差一整圈就是真差一圈，必须精确到位。"""
+    """多圈模式下读数是有符号绝对值：差一整圈就是真差一圈，必须精确到位。"""
     bus = fake_bus([22], raw_position=100)
     result = provision.Provisioner(bus).provision(
         22, calibrate="offset", mode="reinit", multiturn=True)
     assert result["ok"], result["error"] + str(result["steps"])
     assert result["snapshot"]["multiturn"] is True
-    assert result["snapshot"]["position"] == -299, result["steps"][-1]["detail"]
+    assert result["snapshot"]["position"] == 2347, result["steps"][-1]["detail"]
 
 
 def test_offset_calibration_survives_the_opposite_sign_convention():
@@ -478,8 +583,9 @@ def test_offset_calibration_survives_the_opposite_sign_convention():
     bus = fake_bus([1], raw_position=1234, invert_convention=True)
     result = provision.Provisioner(bus).provision(20, calibrate="offset")
     assert result["ok"], result["error"] + str(result["steps"])
-    assert result["calibration"]["position_after"] == 0
-    assert (result["snapshot"]["position_offset"] - (-1234)) % 4096 == 0
+    assert result["calibration"]["position_after"] == provision.POSITION_CENTER
+    # 约定相反时所需偏移也反号：offset ≡ 目标 − 编码器（正约定是 编码器 − 目标）。
+    assert (result["snapshot"]["position_offset"] - (2048 - 1234)) % 4096 == 0
 
 
 def test_provision_refuses_an_occupied_target_id():
@@ -500,9 +606,10 @@ def test_provision_reinit_mode_recalibrates_an_existing_servo():
     result = provisioner.provision(10, calibrate="offset", mode="reinit")
     assert result["ok"], result["error"] + str(result["steps"])
     assert result["snapshot"]["id_read"] == 10
-    # 重新初始化不能改写主 ID，但要重新做校准。
-    assert result["snapshot"]["position"] == 0
-    assert (result["snapshot"]["position_offset"] - 3000) % 4096 == 0
+    # 重新初始化不能改写主 ID，但要重新做校准（right_hip_yaw 的关节角 0 = 计数 2048）。
+    assert result["snapshot"]["position"] == provision.POSITION_CENTER
+    assert result["snapshot"]["joint_counts"] == 0
+    assert (result["snapshot"]["position_offset"] - (3000 - 2048)) % 4096 == 0
 
 
 def test_offset_calibration_offset_always_fits_the_register():
@@ -514,19 +621,70 @@ def test_offset_calibration_offset_always_fits_the_register():
         assert result["ok"], (raw, result["error"], result["steps"])
         snap = result["snapshot"]
         assert abs(snap["position_offset"]) <= provision.OFFSET_LIMIT, (raw, snap)
-        assert snap["position"] == -299, (raw, snap)
+        assert snap["position"] == 2347, (raw, snap)
 
 
 def test_offset_calibration_restores_the_offset_instead_of_faking_it():
-    """调不到目标时必须如实报失败，并把原来的偏移写回去，不留半校准状态。"""
-    # 编码器在 4095、目标 −299：多圈下读数是有符号绝对值，差一圈就是真差一圈。
-    bus = fake_bus([22], raw_position=4095)
-    result = provision.Provisioner(bus).provision(
-        22, calibrate="offset", mode="reinit", multiturn=True)
-    assert not result["ok"]
-    detail = result["steps"][-1]["detail"]
+    """调不到目标时必须如实报失败，并把原来的偏移写回去，不留半校准状态。
+
+    单圈模式下 0..4095 里的**任何**目标都到得了（偏移 = 编码器 − 目标，且落在 ±4095 内），
+    而且判等是取模的，所以"一圈之外的目标"也一样到得了。要让这条路径真的走不通，
+    得用多圈模式的精确判等 + 一个偏移量程也够不着的目标：编码器 0、目标 5000 需要
+    −5000 的偏移，超过 31 号的 ±4095。
+    """
+    bus = fake_bus([22], raw_position=0)
+    log = provision.StepLog()
+    ok, _ = provision.Provisioner(bus)._calibrate_offset(22, 5000, log, multiturn=True)
+    assert not ok
+    detail = log.items[-1]["detail"]
     assert "没能把读数调到" in detail and "恢复" in detail, detail
     assert bus._serial.servos[22]["offset"] == 0, "失败时必须把偏移恢复原值"
+
+
+def test_rewind_offset_moves_whole_turns_and_refuses_the_impossible():
+    """整圈挪偏移的算式：能在 31 号量程内就把读数搬回单圈，超了就明确放弃。"""
+    # 真机那一例：head_yaw 读数 6289、偏移 −668 → 偏移 +4096 = 3428，读数回到 2193。
+    assert provision.rewind_offset(6289, -668) == 3428
+    assert (6289 - 2193) % provision.POSITION_WRAP == 0        # 正好一整圈
+    assert provision.rewind_offset(6289, -45) == 4051          # 刚好还在 ±4095 内
+    assert provision.rewind_offset(6289, 4000) is None         # 要 +4096 就超量程
+    assert provision.rewind_offset(2193, -668) is None         # 已经在窗口里
+    assert provision.rewind_offset(-500, 0) is None            # 0 → −4096，超量程
+
+
+def test_provision_rewinds_an_out_of_turn_reading_without_moving_the_joint():
+    """56 号必须落在单圈里，而初始化过去不查这一条。
+
+    这批舵机出厂相位 18 号 = 0x34（bit 4 全角度反馈），位置读数**不会自己回绕**，
+    被手推过一整圈之后会读到 4096 以上；robotd 只读单圈字段、超出就取模屏蔽，
+    于是"目标 == 实测"看着正常，下一次写目标却让关节转回去一整圈
+    （2026-10-05 真机 head_yaw 6289，`robotctl robot init` 时脖子转了两圈）。
+    """
+    bus = fake_bus([22])
+    servo = bus._serial.servos[22]
+    servo["regs"][18] = 0x34                # 真机出厂相位：全角度反馈
+    servo["offset"] = -668
+    servo["raw_position"] = 6289 - 668      # 读数 = 编码器 − 偏移 = 6289，在单圈外
+    assert bus._serial._position(servo) == 6289, "全角度反馈下固件不回绕"
+    p = provision.Provisioner(bus)
+    log = provision.StepLog()
+    ok, detail = p.rewind_position(22, log)
+    assert ok, detail
+    assert servo["offset"] == 3428
+    assert servo["raw_position"] - servo["offset"] == 2193
+    # 关节角按一圈取模算，整圈平移对它不变 —— 物理姿态没动。
+    assert (2193 % provision.POSITION_WRAP) == (6289 % provision.POSITION_WRAP)
+    assert log.items and log.items[-1]["ok"], log.to_list()
+
+
+def test_mid_calibration_targets_2048_not_zero():
+    """「转到中位」写的是 2048（关节角 0），不是 0——0 是一圈的另一端（≈ −180°）。"""
+    bus = fake_bus([1], raw_position=1234)
+    result = provision.Provisioner(bus).provision(20, calibrate="mid")
+    assert result["ok"], result["error"] + str(result["steps"])
+    assert result["calibration"]["position"] == provision.POSITION_CENTER
+    assert result["snapshot"]["joint_counts"] == 0
+    assert "转到中位（目标位置 2048）" in [s["name"] for s in result["steps"]]
 
 
 def test_gain_default_is_the_vendors_value_not_robots_200():
@@ -584,6 +742,37 @@ def test_provision_can_leave_the_gain_alone():
     assert "写位置环增益" in [item["name"] for item in result["steps"]]
 
 
+def test_port_holders_detects_another_process():
+    """串口被别的进程占着时必须查得出来。
+
+    `robotd` 用 `TIOCEXCL` 打开 `/dev/ttyS2`，但那个排他标志只挡没有 `CAP_SYS_ADMIN` 的
+    进程——两个 root 进程可以同时打开同一个 tty（2026-10-05 在板子上实测如此）。
+    互吃应答帧的现象是"每个 tick 随机丢几个舵机"，所以这条检查不能只靠内核。
+    """
+    from . import server
+
+    assert server.port_holders("/etc/hostname") == [], "普通文件不是串口"
+    assert server.port_holders("/dev/definitely-not-here") == []
+
+    handle = open("/dev/zero", "rb")
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(10)"],
+                             stdin=handle)
+    try:
+        found = []
+        for _ in range(60):
+            found = [item for item in server.port_holders("/dev/zero")
+                     if item["pid"] == child.pid]
+            if found:
+                break
+            time.sleep(0.05)
+        assert found, "没能发现持有 /dev/zero 的子进程（pid %d）" % child.pid
+        assert found[0]["name"], found
+    finally:
+        child.kill()
+        child.wait()
+        handle.close()
+
+
 def test_census_reports_who_is_on_the_bus():
     bus = fake_bus([10, 24])
     data = provision.Provisioner(bus).census()
@@ -602,7 +791,10 @@ def main():
     test_memory_table()
     test_feedback_decode()
     test_joint_table_matches_microduck()
+    test_position_direction_matches_the_driver()
     test_provision_fresh_servo_gets_its_joint_id()
+    test_rewind_offset_moves_whole_turns_and_refuses_the_impossible()
+    test_provision_rewinds_an_out_of_turn_reading_without_moving_the_joint()
     test_provision_enables_multiturn_so_negative_angles_work()
     test_multiturn_defaults_to_off_single_turn_limits()
     test_provision_restores_single_turn_on_an_already_multiturn_servo()
@@ -615,7 +807,9 @@ def main():
     test_provision_gain_is_configurable_and_clamped()
     test_provision_can_leave_the_gain_alone()
     test_provision_cal_calibration_lands_on_the_2048_midpoint()
+    test_joint_table_carries_both_the_angle_and_the_servo_count()
     test_provision_offset_calibration_hits_the_home_pose()
+    test_mid_calibration_targets_2048_not_zero()
     test_offset_calibration_wraps_a_negative_home_angle_without_multiturn()
     test_offset_calibration_is_exact_when_multiturn_is_on()
     test_offset_calibration_survives_the_opposite_sign_convention()
@@ -623,6 +817,7 @@ def main():
     test_provision_reinit_mode_recalibrates_an_existing_servo()
     test_offset_calibration_offset_always_fits_the_register()
     test_offset_calibration_restores_the_offset_instead_of_faking_it()
+    test_port_holders_detects_another_process()
     test_census_reports_who_is_on_the_bus()
     print("HLS debugger self-test: OK")
 

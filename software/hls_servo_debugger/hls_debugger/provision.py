@@ -25,21 +25,36 @@
 **写 0 = 关闭写入锁**（EPROM 写入掉电保存，能改 ID/波特率），
 **写 1 = 打开写入锁**（EPROM 写入掉电不保存）。所以"解锁"是写 0、"上锁"是写 1。
 
-位置坐标与负值（真机实测结论）
-------------------------------
-在 HD-1910-C001（固件 3.46）上实测，三件事按重要性排列：
+位置坐标：2048 = 关节角 0，而且**计数轴是反的**（2026-10-05 修）
+--------------------------------------------------------------
+整机现在按 **单圈** 跑，关节角零点在 **2048 计数**上，换算完全照 robotd 的驱动层
+（`microduck_feetech/duck-control/src/feetech.rs`）：
 
-1. **出厂设置下负的目标位置不生效。** 出厂 ``9/11 号角度限制 = 0/4095``，位置坐标被夹在
-   一圈 ``[0, 4095]`` 内：写目标 −500 **协议层被接受**（42 号回读 −500），
-   但 67 号"目标位置回读"是 0、舵机不动。把 ``9 号 = 0、11 号 = 0``
-   （厂商内存表："多圈绝对位置控制时此值为 0"）之后，同一个 −500 真的走到了。
-   所以 **microduck 整机必须打开多圈**：关节表里有 4 个 home 姿态角是负的。
-   界面上这个开关**默认关闭**（台面单机调试一圈内更安全），两个方向都会真的写
-   9/11 号：勾选写 0/0（多圈），取消写 0/4095（单圈行程）。
-2. **打开多圈、位置偏移(31) 保持 0 时，坐标是干净的**：实测写目标
-   −500 → 当前位置 −500、−1000 → −999、−300 → −301，67 号目标回读同步跟随；
-   同时 31 号 = 0 时读数就是编码器值。**这就是推荐配置**，
-   机械零位由"把舵盘装在 home 姿态"决定，偏移只用来做小幅修正。
+    rad = DIRECTION · (计数 − 2048) · 2π/4096        DIRECTION = −1
+    计数 = 2048 + DIRECTION · rad/0.0879°            （都在 0..4095 内）
+
+`DIRECTION = −1` 是**实测值**（2026-10-03 手转三个关节，见 `microduck_feetech/docs/robot/
+joint-direction-check.md`）：HD-1910-C001 与它替换掉的 XL330 转向相反，所以**计数增大对应
+关节角变小**。本文件这段以前写的是 `rad = +(计数 − 2048)·…`，那张关节表的「舵机字段」列
+因此整列是镜像的（left_hip_pitch 曾写 1749，正确是 **2347**）——照旧表把关节摆过去，会把
+15 个关节全对到镜像位置。`POSITION_DIRECTION` 现在是本模块唯一的符号来源，`selftest.py`
+有一条用例直接读 `feetech.rs` 核对它。
+
+所以本工具的三个动作是：CAL 把当前位置写成 **2048**；「按 home 姿态写偏移」的目标是
+**2048 + 方向 × home 角计数**；「转到中位」写 **2048**。位置字段是干净的 0..4095，
+没有负值、没有方向位——这也是"不使用负值"那句话在代码里的样子。历史上让 15 台舵机各读
+2048 的就是 CAL，所以 2048 同时是"舵机的行程中点"和"这个关节的角零点"。
+
+下面是同一批硬件上关于**多圈**与偏移的实测结论，留着是因为 9/11 号那个开关还在界面上，
+而且「大偏移会把坐标重锚」这条决定了 `_calibrate_offset` 为什么不做公式假设：
+
+1. **多圈模式（9/11 = 0/0）下负的目标位置才生效。** 出厂 ``9/11 = 0/4095`` 把位置夹在
+   一圈 ``[0, 4095]`` 内：写目标 −500 **协议层被接受**（42 号回读 −500）但舵机不动；
+   把 ``9 号 = 0、11 号 = 0`` 之后同一个 −500 真的走到了。
+   **现在不用这套**：整机按单圈跑，负角由「2048 = 0」的坐标变换消化掉，
+   不再需要负的字段值。界面上这个开关默认关闭，两个方向都会真的写 9/11 号。
+2. **多圈 + 位置偏移(31) 保持 0 时坐标是干净的**：写目标 −500 → 当前位置 −500、
+   −1000 → −999、−300 → −301，67 号目标回读同步跟随。
 3. **拿大偏移去搬原点不可靠。** 写一个较大的偏移会让固件把编码器坐标**重锚**：
    实测偏移 −3591→−3091（+500）后读数从 −4096 变成 −500（差 3596），
    而 −3591→−4591（−1000）后读数从 −4096 变成 −3096（差 1000）——同一根轴、
@@ -47,15 +62,15 @@
    手册没写这些（`docs/飞特通讯协议说明.md` 第 12.5 节列为未确认项），
    因此 ``_calibrate_offset`` **不做公式假设**：有界搜索候选偏移 + 逐个回读验证，
    全部不中就把原偏移写回去并如实报失败。
-   经验上"读数离目标越近（所需偏移越小）越可靠"，所以校准前把关节摆到 home 姿态时，
-   尽量让读数落在 0 附近。
+   经验上"读数离目标越近（所需偏移越小）越可靠"，所以校准前把关节摆到基准位时，
+   尽量让读数离目标计数近一些。
 
-另外 ``CAL(0x0B)`` 的语义是确定的：把**此刻的物理位置**写成 **2048 计数（180°）**，
+另外 ``CAL(0x0B)`` 的语义是确定的：把**此刻的物理位置**写成 **2048 计数**，
 并相应改写 31 号偏移（实测 CAL 前 偏移 = 0、位置 = 72；CAL 后 偏移 = −1976、位置 = 2048）。
 
 `duck-control` 的 ``DEFAULT_POSITION`` 用的是有符号关节角，而
-``feetech.rs::position_rad`` 按"BIT15 为方向位"解读位置字段——打开多圈之后
-舵机给的正是这种写法，两者方向一致。
+``feetech.rs::position_counts_to_rad`` 减去 2048、再乘 ``POSITION_DIRECTION`` 之后得到的
+正是同一个角度——单圈模式下舵机字段永远是 0..4095，符号只存在于软件这一侧。
 """
 
 from __future__ import absolute_import
@@ -98,6 +113,33 @@ from .protocol import (
 COUNTS_PER_REV = 4096.0
 RAD_PER_COUNT = 2.0 * math.pi / COUNTS_PER_REV
 DEG_PER_COUNT = 360.0 / COUNTS_PER_REV
+#: **计数轴的方向**：`rad = DIRECTION · (计数 − 2048) · 2π/4096`。
+#:
+#: 与 `duck-control/src/feetech.rs` 的 `POSITION_DIRECTION` 必须逐位一致（−1.0）。
+#: −1 表示**计数增大 = 关节角变小**。它是实测值，不是继承值：XL330 那一代的约定是
+#: `+1`（`2π·raw/4096 − π`，也就是本式取 +1），而 HD-1910-C001 在同样的舵盘安装下
+#: 转向相反。2026-10-03 手转三个关节（left_hip_pitch、left_ankle、right_ankle）实测；
+#: 两只踝互为镜像、计数朝相反方向走，所以这是一次**全局**翻转而不是逐关节的舵盘问题。
+#: 判据、步骤与被推翻的可能见 `microduck_feetech/docs/robot/joint-direction-check.md`。
+#:
+#: 写错这一个数的后果不是"差一点"：15 个关节全部反向，而且「按 home 姿态写偏移」会把
+#: 关节对到镜像位置还报成功（它是回读验证的，回读当然对）。`selftest.py` 有一条用例
+#: 直接读 `feetech.rs` 的源码核对本常量。
+POSITION_DIRECTION = -1.0
+#: **关节角零点所在的计数**：舵机单圈行程 0..4095 的中点。
+#:
+#: robotd 的驱动层就是这么换算的（`duck-control/src/feetech.rs` 的 `POSITION_CENTER`）：
+#: ``关节角 = POSITION_DIRECTION · (计数 − 2048) · 2π/4096``，位置字段是干净的 0..4095、
+#: 没有负值、没有方向位（前提是 9/11 号角度限制 = 0/4095，即单圈模式）。所以本工具：
+#:
+#: * 「中位校准 CAL」= 把此刻的物理位置写成 **2048**（也就是关节角 0），
+#: * 「按 home 姿态写位置偏移」的目标 = **2048 + 方向 × home 姿态角对应的计数**，
+#: * 「转到中位」= 写目标位置 **2048**（不是 0；0 是一圈的另一端 ≈ −180°）。
+#:
+#: 关节表里的 `home_counts` 仍然是**关节角**的计数表示（例如 left_hip_pitch = −299），
+#: 要写到舵机上的**计数**是 ``home_count = POSITION_CENTER + home_counts / POSITION_DIRECTION``
+#: （方向 −1 时 left_hip_pitch = 2048 + 299 = **2347**）。
+POSITION_CENTER = 2048
 # 位置偏移（31 号）量程 ±4095 计数，也就是最多挪一圈。
 OFFSET_LIMIT = 4095
 #: 位置读数的一圈计数。实测本机（HD-1910-C001 / 固件 3.46）：
@@ -114,6 +156,38 @@ def _wrap_delta(got, want, wrap=POSITION_WRAP):
     """两个位置读数在一圈上的最短距离，用来做与表示方式无关的比较。"""
     delta = (int(got) - int(want)) % wrap
     return min(delta, wrap - delta)
+
+
+def rewind_offset(position, offset, limit=OFFSET_LIMIT):
+    """把 ``position``（56 号读数）挪回单圈 ``0..4095`` 所需的**整圈**偏移修正。
+
+    返回新的 31 号值；已经在窗口内、或修正后超出 ``±limit`` 时返回 ``None``。
+
+    为什么需要它（2026-10-05 真机）：这批 HD-1910-C001 的 18 号相位**出厂就是
+    ``0x34``——bit 4「角度反馈模式 = 全角度」在 15 个舵机上完全一致**，不是某一颗
+    的异常。全角度反馈的代价是 56 号**不会自己回绕**：关节被手推着转过一整圈之后，
+    读数会跑到 4096 以上（实测 ``head_yaw`` 读到 **6289**）。
+
+    ``robotd`` 的驱动层只认单圈字段（``bus.rs`` 的注释自己写着 "masks around rather
+    than solves"），超出的读数会被取模屏蔽 —— 于是它以为关节在 2193，实际在 6289，
+    下一次写目标就把脖子**转回去一整圈**，而且"目标 == 实测"让上层完全看不出异常。
+    ``audit_registers`` 会为此报一条 warn，但**它只是警告，后续照样写目标**。
+
+    修法不是去动相位（全角度是这批舵机的出厂值，动它等于改整机的反馈约定），而是把
+    位置偏移挪**整圈**：``位置 = 编码器值 − 偏移``，所以位置减 4096 就把偏移加 4096；
+    关节角是 ``方向 · ((位置 mod 4096) − 2048)``，整圈平移对它**不变**——物理姿态一动
+    不动，只是读数回到 robotd 能读的窗口里。
+    """
+    position = int(position)
+    offset = int(offset)
+    if 0 <= position < POSITION_WRAP:
+        return None
+    # 让 position + k·WRAP 落进 0..4095：k = −floor(position / WRAP)。
+    turns = -(position // POSITION_WRAP)
+    want = offset - turns * POSITION_WRAP
+    if abs(want) > limit:
+        return None
+    return want
 
 
 #: 锁标志的两个取值，按厂商内存表的字面措辞命名，避免"打开/关闭"歧义。
@@ -190,6 +264,7 @@ _JOINT_SOURCE = [
 def _build_joints():
     joints = []
     for index, (name, joint_id, group, home_rad) in enumerate(_JOINT_SOURCE):
+        home_counts = int(round(home_rad / RAD_PER_COUNT))
         joints.append({
             "index": index,
             "name": name,
@@ -197,7 +272,15 @@ def _build_joints():
             "group": group,
             "home_rad": home_rad,
             "home_deg": round(home_rad / math.pi * 180.0, 3),
-            "home_counts": int(round(home_rad / RAD_PER_COUNT)),
+            #: 计数轴方向（`POSITION_DIRECTION`）。界面用它把"关节角计数"换算成舵机字段，
+            #: 所以把它放进表里，前端就不必自己写死符号。
+            "direction": POSITION_DIRECTION,
+            #: home 姿态角，以计数表示（可为负，是"关节角"而不是舵机字段值）
+            "home_counts": home_counts,
+            #: 要写到舵机上的 42/56 号计数：`2048 + 方向 × 关节角计数`，落在 0..4095。
+            #: 方向 −1（实测）时，负的 home 角在舵机字段里表现为 **大于** 2048 的计数：
+            #: left_hip_pitch 的 −299 计数 → **2347**。
+            "home_count": int(round(POSITION_CENTER + home_counts / POSITION_DIRECTION)),
         })
     return joints
 
@@ -226,26 +309,31 @@ CALIBRATE_MODES = [
     {
         "id": "cal",
         "name": "中位校准（CAL 指令）",
-        "desc": "执行厂商 CAL(0x0B)：把该关节此刻的物理位置写成位置偏移中点。"
-                "实测（HD-1910-C001 / 固件 3.46）校准后位置读数是 2048 计数（180°），"
+        "desc": "执行厂商 CAL(0x0B)：把该关节此刻的物理位置写成 **2048 计数**——也就是 robotd "
+                "驱动的**关节角 0**（`duck-control/src/feetech.rs` 的 POSITION_CENTER）。"
+                "实测（HD-1910-C001 / 固件 3.46）校准后位置读数就是 2048 计数，"
                 "并把 31 号位置偏移改写成相应数值。执行前需要把关节摆到装配基准位。",
         "needs_reference": True,
     },
     {
         "id": "offset",
         "name": "按 home 姿态写位置偏移",
-        "desc": "把 31 号位置偏移改成“关节此刻的读数 = 该关节 home 姿态角”。"
-                "这条角来自 duck-control 的 DEFAULT_POSITION。"
-                "注意：实测大偏移会让固件重锚坐标，所以只在“当前读数离目标较近”时可靠；"
-                "工具会有界搜索候选并逐个回读验证，全不中就把偏移写回原值并报失败。"
-                "推荐做法是让关节在 home 姿态时读数落在 0 附近（舵盘换个齿位即可）。",
+        "desc": "把 31 号位置偏移改成「关节此刻的读数 = 该关节 home 姿态角」。"
+                "要写到的计数是 **2048 + 方向 × home 姿态角/0.0879°**，方向取 "
+                "`feetech.rs` 的 POSITION_DIRECTION（实测 **−1**）：例如 left_hip_pitch 的 "
+                "home 角是 −0.4579 rad（−299 计数），目标计数就是 2048 + 299 = **2347**。"
+                "注意：实测大偏移会让固件把编码器坐标回绕到约 ±2 圈的窗口里，所以只在"
+                "“当前读数离目标较近”时可靠；工具会有界搜索候选（正反两种约定都试）并逐个"
+                "回读验证，全不中就把偏移写回原值并报失败。"
+                "推荐做法是让关节在 home 姿态时读数落在目标附近（差得多就换个齿位）。",
         "needs_reference": True,
     },
     {
         "id": "mid",
-        "name": "转到位置 0（写目标位置 0）",
-        "desc": "让输出轴转到位置坐标 0（0°）并保持扭矩，方便按舵盘标记装配，不写 EPROM。"
-                "注意厂商文档里的“中点”是 2048 计数（180°），和这里的 0 不是同一个位置。",
+        "name": "转到中位（写目标位置 2048）",
+        "desc": "让输出轴转到位置坐标 **2048**（关节角 0、一圈的中点）并保持扭矩，"
+                "方便按舵盘标记装配，不写 EPROM。"
+                "注意这里是 2048 而不是 0：在单圈 0..4095 字段里 0 是一圈的另一端（≈ −180°）。",
         "needs_reference": False,
     },
     {
@@ -470,9 +558,19 @@ class Provisioner(object):
 
         feedback = self.bus.feedback(servo_id, timeout=timeout).data
         position = _signed(_word(feedback[0], feedback[1]))
+        #: 关节角（计数表示）：`POSITION_DIRECTION · (计数 − 2048)`，与 robotd 的
+        #: `feetech.rs::position_counts_to_rad` 同一条式子。取模先做，因为多圈模式下
+        #: 56 号可能带 BIT15 方向位或超出单圈。
+        joint_counts = POSITION_DIRECTION * (position % POSITION_WRAP - POSITION_CENTER)
         info.update({
             "feedback_hex": feedback.hex(" ").upper(),
+            #: 56 号读到的原始计数。单圈模式下就是 0..4095；万一舵机还在多圈模式，
+            #: 它可能带 BIT15 方向位，所以按一圈取模，避免算出离谱的关节角。
             "position": position,
+            "position_counts": position % POSITION_WRAP,
+            #: 关节角：相对 2048 的偏差，再按 `POSITION_DIRECTION` 定向。
+            "joint_counts": int(round(joint_counts)),
+            "joint_deg": round(joint_counts * DEG_PER_COUNT, 3),
             "position_deg": round(position * DEG_PER_COUNT, 3),
             "speed": _signed(_word(feedback[2], feedback[3])),
             "load": _signed(_word(feedback[4], feedback[5]), 10),
@@ -637,6 +735,44 @@ class Provisioner(object):
     def _read_offset(self, servo_id):
         return self._read_word_signed(servo_id, ADDR_POSITION_OFFSET)
 
+    def rewind_position(self, servo_id, log=None, timeout=None):
+        """把跑出单圈的 56 号读数按**整圈**挪回 ``0..4095``（只动 31 号偏移）。
+
+        理由与算式见模块级 :func:`rewind_offset`：这批舵机出厂相位 bit 4 是全角度
+        反馈，位置读数不会自己回绕；跑出去之后 ``robotd`` 只会取模屏蔽，任何一次写
+        目标都会让关节转回去一整圈。整圈挪偏移不动物理姿态，只把读数搬回窗口。
+        """
+        try:
+            position = self._read_position(servo_id)
+            offset = self._read_offset(servo_id)
+        except ProtocolError as exc:
+            return False, "回读位置/偏移失败：%s" % exc.message
+        want = rewind_offset(position, offset)
+        if want is None:
+            if 0 <= position < POSITION_WRAP:
+                return True, "56 号 = %d 已在单圈内（偏移 %d）" % (position, offset)
+            detail = ("56 号 = %d 在单圈外，而把偏移从 %d 挪一整圈会超出 ±%d 的量程。"
+                      "先把关节手动转回一圈内，或按 home 姿态重新校准偏移。"
+                      % (position, offset, OFFSET_LIMIT))
+            if log is not None:
+                log.add("位置读数挪回单圈", False, detail)
+            return False, detail
+        self._write_eeprom(servo_id, ADDR_POSITION_OFFSET, _signed_bytes(want))
+        time.sleep(EEPROM_SETTLE)
+        try:
+            after = self._read_position(servo_id)
+            offset_after = self._read_offset(servo_id)
+        except ProtocolError as exc:
+            return False, "写入新偏移后回读失败：%s" % exc.message
+        same_angle = (after - position) % POSITION_WRAP == 0
+        ok = 0 <= after < POSITION_WRAP and same_angle
+        detail = ("56 号 %d → %d，偏移 %d → %d；关节角 %s"
+                  % (position, after, offset, offset_after,
+                     "不变（整圈平移，姿态没动）" if same_angle else "变了 —— 必须查"))
+        if log is not None:
+            log.add("位置读数挪回单圈（整圈挪偏移）", ok, detail)
+        return ok, detail
+
     def _calibrate_cal(self, servo_id, log):
         """厂商 CAL 指令：把当前位置写成位置偏移中点。
 
@@ -680,23 +816,23 @@ class Provisioner(object):
 
         * 位置与偏移相差一个常量：``位置 = 编码器值 − 偏移``（读数为负时，
           一圈内模式还会把结果回绕成 ``4096 + 值``）；
-        * **写一个较大的偏移会让固件把编码器坐标整体重锚**：
-          实测偏移 −3591→−3091（+500）之后读数从 −4096 变成 −500（差 3596），
-          而 −3591→−4591（−1000）之后读数从 −4096 变成 −3096（差 1000）——
-          同一台舵机、同一根轴，写偏移前后的差值不是同一个常量；
-          读数还总被折进约 ±2 圈的窗口。
-        * 手册没写这些（`docs/飞特通讯协议说明.md` 第 12.5 节把它列为未确认项），
-          所以**经验规律是"所需偏移越小越可靠"**，公式覆盖不了重锚。
-
-        因此这里不做公式假设，改成有界搜索 + 逐个回读验证：
+        * 三个"写大偏移"的实测点（偏移 31 号、位置 56 号）是
+          ``(−3591, −4096) → (+500, −500) → (+1000, −1000) → (+2000, −2000) → (−1000, −3096)``，
+          每一行都满足 ``位置 + 偏移 = 常数 (−7687)`` ——也就是说**关系其实是线性的**，
+          看着像"重锚"的那几行是读数被折进约 ±2 圈窗口后的回绕。手册没写这个窗口
+          （`docs/飞特通讯协议说明.md` 第 12.5 节把它列为未确认项），所以这条**只是复算**
+          （2026-10-05），还没在真机上按公式写过；等有了实测再改成公式。
+        * 因此这里仍然不做公式假设，改成有界搜索 + 逐个回读验证：
 
         1. 由 ``位置 = 编码器 − 偏移`` 反推编码器值，算出"正/反两种约定"下
-           各自需要的偏移，再把每个候选按 ±一整圈展开（覆盖重锚）；
-        2. 按"离当前偏移最近"排序——偏移动得越小，越不容易触发重锚；
+           各自需要的偏移，再把每个候选按 ±一整圈展开；
+        2. 按"离当前偏移最近"排序——偏移动得越小越好；
         3. 逐个写下去、读回来，**只有落在容差内才算成功**；
         4. 全都不行就**把原偏移写回去**，绝不留一个半校准的舵机。
 
-        最终判据永远只有回读结果，而不是任何一条公式。
+        最终判据永远只有回读结果，而不是任何一条公式。**注意 target_counts 必须是
+        驱动层约定下的计数**（`POSITION_CENTER + home_counts / POSITION_DIRECTION`）：
+        本函数会回读验证，所以目标给成镜像位置它一样会"成功"。
         """
         want = int(target_counts)
         ofs0 = self._read_offset(servo_id)
@@ -743,7 +879,11 @@ class Provisioner(object):
         return False, log.add("按 home 姿态写位置偏移", False, detail)
 
     def _calibrate_mid(self, servo_id, log, speed=60, acc=30, timeout=4.0):
-        """写目标位置 0，等它到位，然后保持扭矩以便装舵盘。"""
+        """写目标位置 2048（关节角 0），等它到位，然后保持扭矩以便装舵盘。
+
+        目标是 [`POSITION_CENTER`]，不是 0：单圈字段 0..4095 里 0 是一圈的另一端（≈ −180°），
+        2048 才是这段行程的中点，也正是驱动层认定的关节角 0。
+        """
         self._write(servo_id, ADDR_MODE, bytes([0]))
         self._write(servo_id, ADDR_TORQUE_ENABLE, b"\x01")
         try:
@@ -755,24 +895,23 @@ class Provisioner(object):
         except ProtocolError:
             pass
         try:
-            self.bus.write(servo_id, ADDR_GOAL_POSITION, _signed_bytes(0))
+            self.bus.write(servo_id, ADDR_GOAL_POSITION, _signed_bytes(POSITION_CENTER))
         except ProtocolError as exc:
-            return False, log.add("转到中位（目标位置 0）", False, exc.message)
+            return False, log.add("转到中位（目标位置 2048）", False, exc.message)
 
         deadline = time.monotonic() + max(0.5, float(timeout))
         position = self._read_position(servo_id)
         while time.monotonic() < deadline:
             position = self._read_position(servo_id)
-            # 位置读数按一圈回绕，0 与 4095 是相邻的两个点。
-            if min(position % POSITION_WRAP, POSITION_WRAP - position % POSITION_WRAP) <= 8:
+            if _wrap_delta(position, POSITION_CENTER) <= 8:
                 break
             time.sleep(0.1)
-        error = min(position % POSITION_WRAP, POSITION_WRAP - position % POSITION_WRAP)
+        error = _wrap_delta(position, POSITION_CENTER)
         ok = error <= 8
         return ok, log.add(
-            "转到中位（目标位置 0）",
+            "转到中位（目标位置 2048）",
             ok,
-            "当前读数 = %d 计数（误差 %d 计数 ≈ %.2f°）；扭矩保持开启便于装舵盘"
+            "当前读数 = %d 计数（偏离 2048 共 %d 计数 ≈ %.2f°）；扭矩保持开启便于装舵盘"
             % (position, error, error * DEG_PER_COUNT),
         )
 
@@ -947,12 +1086,13 @@ class Provisioner(object):
             ofs_before = self._read_offset(target_id)
             pos_before = self._read_position(target_id)
             ok, _step = self._calibrate_offset(
-                target_id, target["home_counts"], log, multiturn=multiturn
+                target_id, target["home_count"], log, multiturn=multiturn
             )
             result["calibration"] = {
                 "mode": "offset",
-                "target_counts": target["home_counts"],
-                "target_wrapped": target["home_counts"] % POSITION_WRAP,
+                "target_counts": target["home_count"],
+                "target_joint_counts": target["home_counts"],
+                "target_wrapped": target["home_count"] % POSITION_WRAP,
                 "target_deg": target["home_deg"],
                 "offset_before": ofs_before,
                 "position_before": pos_before,
@@ -988,6 +1128,18 @@ class Provisioner(object):
             except ProtocolError as exc:
                 return finish(False, "回读扭矩失败：%s" % exc.message)
             log.add("关闭扭矩", torque == 0, "回读 40 号 = %d（期望 0）" % torque)
+
+        # 12. 56 号必须在单圈 0..4095 里 —— 这是 robotd 的硬要求，而初始化过去不查。
+        #
+        # 出厂相位 18 号 = 0x34（bit 4「角度反馈模式 = 全角度」）在 15 个舵机上一致，
+        # 所以位置读数**不会自己回绕**：关节被手推过一整圈之后读数会跑到 4096 以上，
+        # robotd 的驱动层只认单圈字段、会取模屏蔽，接着任一次写目标都让关节转回去
+        # 一整圈（2026-10-05 真机：head_yaw 读到 6289，init 时脖子飞快转了两圈）。
+        # 不在这里动相位（那是整机的反馈约定），而是把偏移挪整圈把读数搬回来。
+        window_ok, window_detail = self.rewind_position(target_id, log, timeout=timeout)
+        result["position_window"] = window_detail
+        if not window_ok:
+            return finish(False, "位置读数不在单圈内：%s" % window_detail)
 
         # 10. 回读校验
         try:
@@ -1025,6 +1177,11 @@ class Provisioner(object):
                "开" if snap["protect_voltage"] else "关",
                "开" if snap["protect_over_current"] else "关"),
         ))
+        checks.append((
+            "位置读数在单圈内",
+            0 <= snap["position"] < POSITION_WRAP,
+            "56 号 = %d（robotd 只读单圈字段；出圈就是取模屏蔽）" % snap["position"],
+        ))
         verified = all(item[1] for item in checks)
         log.add(
             "回读校验",
@@ -1041,13 +1198,17 @@ class Provisioner(object):
 
 
 def main():
-    """离线打印关节表，方便与 model.rs 对照。"""
+    """离线打印关节表，方便与 model.rs / feetech.rs 对照。"""
     print("microduck 关节表（%d 台）" % len(JOINTS))
-    print("%-4s %-18s %-6s %-10s %-11s %s" % ("序", "关节名", "ID", "部位", "home(°)", "home(计数)"))
+    print("关节角零点 = %d 计数、方向 = %+g（feetech.rs 的 POSITION_DIRECTION）；"
+          "「舵机字段」列 = 2048 + 方向 × home 角计数，也就是 42/56 号里的值。"
+          % (POSITION_CENTER, POSITION_DIRECTION))
+    print("%-4s %-18s %-6s %-10s %-11s %-11s %s"
+          % ("序", "关节名", "ID", "部位", "home(°)", "home(计数)", "舵机字段"))
     for item in JOINTS:
-        print("%-4d %-18s %-6d %-10s %-11.3f %d"
+        print("%-4d %-18s %-6d %-10s %-11.3f %-11d %d"
               % (item["index"] + 1, item["name"], item["id"], item["group"],
-                 item["home_deg"], item["home_counts"]))
+                 item["home_deg"], item["home_counts"], item["home_count"]))
     print("出厂 ID = %d，IMU 总线 ID = %d，期望波特率编码 = %d"
           % (FRESH_ID, IMU_BUS_ID, EXPECTED_BAUD_CODE))
 

@@ -20,7 +20,7 @@
 > * `docs/flash_layout.md` —— Flash 分区 / bootloader / 总线升级协议设计（待实现）
 > * `docs/lsm6dsv16x_driver_spec.md` —— 真 LSM6DSV16X 驱动规格（含 §8.1 CONVERGE 实现状态）
 > * `docs/bus_timing_borrow_plan.md` —— 总线时序风险分析 + 借鉴计划（**已实施**；真机缺陷见 §4.6，真机验证见 §7）
-> * `patches/microduck_feetech_patch.md` —— 官方 `microduck` 仓库飞特补丁说明（补丁文件同目录）
+> * `patches/README.md` —— 官方 `microduck` 仓库飞特补丁说明（补丁文件同目录；原名 `microduck_feetech_patch.md`，`2fc4731` 改名）
 > * `../../software/microduck_feetech/` —— 打好该补丁的官方 `microduck` 完整源码（可直接编译运行 `robotd`）
 > * `../../docs/飞特通讯协议说明.md` —— 飞特协议完整说明
 > * `host/README.md` —— 上位机使用说明
@@ -452,12 +452,6 @@ upgrade → VCMD_BOOT 进 bootloader → 分块写（块 CRC + 序号 + 回读�
 每 35.8 s 回绕（SysTick 重锁存，真 modulo-2^32）、`imu_spi.c` 的 SFLP 重启发布未收敛姿态
 （新增 CONVERGE 状态，1500 ms）。
 
-**曾记为开放项、2026-10-02 已修（主机侧，不是固件/接线）**：`robotd` 跑策略时约 17.5 s 的使能
-窗口里报 97 次（进程共 98 条）`sync_read: id(s) ... missing`，缺失集合总是回复到达顺序的尾部；
-直连同一总线的 16 ID/150 次全完整，所以截断在 `duck-control/src/bus.rs` 的突发处理。处置：删掉
-每笔事务的 `tcdrain`（实测固定 ~12 ms → 控制环 36.3 Hz 变 **50.0 Hz**），`BURST_IDLE` 2 → **4 ms**。
-残留的孤立掉读（0–3 次/5 分钟窗口）是散点而非后缀，与这个判据无关。
-详见 `docs/bus_timing_borrow_plan.md §7.7`。
 
 ## 9. 目录结构
 
