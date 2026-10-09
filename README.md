@@ -11,7 +11,7 @@
 - **banana_pcb**：<a href="hardware/banana_pcb">电池上方的转接小板</a>
 - **dxl_hub**：<a href="hardware/dxl_hub">鸭鸭身体中的集线器板</a>
 - **飞特舵机调试软件**：<a href="software/hls_servo_debugger">飞特舵机调试软件</a>
-- **microduck_feetech**：<a href="software/microduck_feetech">官方机器人软件（robotd 等）的飞特舵机适配版</a>——官方 `microduck` 的完整源码，基于 `f0d934e`（2026-09-28）打上飞特总线补丁，并在 2026-10-02 同步了上游 `main` 的 10 个提交，可直接编译运行；
+- **microduck_feetech**：<a href="https://github.com/jyg9/microduck_ft1910">官方机器人软件（robotd 等）的飞特舵机适配版</a>——官方 `microduck` 的完整参考源码，基于0.16.0打上飞特总线补丁，IMU适配本仓库，可直接编译运行；
 
 
 接线图：
