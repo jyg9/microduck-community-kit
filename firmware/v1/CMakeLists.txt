@@ -95,7 +95,7 @@ set(IMU_USE_SPI "1" CACHE STRING "1 = LSM6DSV16X on SPI0, 0 = the simulator")
 #
 # Decoded before APP_VERSION_STR because the two personalities need different
 # image versions by default - see below.
-set(FEE_IMU_PERSONALITY "ft6" CACHE STRING
+set(FEE_IMU_PERSONALITY "native" CACHE STRING
     "FeeTech side personality: native = this repository's own contract, ft6 = FT6-compatible node")
 set_property(CACHE FEE_IMU_PERSONALITY PROPERTY STRINGS native ft6)
 
