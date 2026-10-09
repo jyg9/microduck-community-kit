@@ -49,6 +49,48 @@ FEE_READ_ADDR = FEE_TELEM_ADDR
 DXL_DIAG_ADDR = DXL_TELEM_ADDR
 FEE_DIAG_ADDR = FEE_TELEM_ALT_ADDR
 
+# ── FeeTech personality (docs/imu_to_dxl_protocol.md §16) ───────────────────
+#: The FeeTech map has two build-time personalities.  `native` is this
+#: repository's own contract (the constants above); `ft6` is byte-compatible
+#: with the FT6 node, which moves its diagnostic block to 124 and the native
+#: 20-byte alias to 196.  A native reader cannot decode an ft6 node's status
+#: byte, and vice versa, so the choice is explicit rather than guessed.
+FEE_PERSONALITY_NATIVE = "native"
+FEE_PERSONALITY_FT6 = "ft6"
+FEE_PERSONALITIES = (FEE_PERSONALITY_NATIVE, FEE_PERSONALITY_FT6)
+#: Identity registers 0..4 of an FT6 node.  Native answers 01 00 00 49 4D.
+FEE_IDENTITY_FT6 = bytes([0x06, 0x00, 0x00, 0x00, 0xF2])
+#: FT6 contract/diagnostic addresses.
+FEE_DIAG_ADDR_FT6 = 124
+FEE_TELEM_ALT_ADDR_FT6 = 196
+#: FT6 status byte (address 69 / block offset 13).  Deliberately a *second*
+#: table: TELEM_FLAG_BITS describes the native flags byte, and bit 0 means the
+#: opposite thing in the two contracts.
+FEE_ST_BITS = {
+    "not_ready": 0x01,
+    "stale": 0x02,
+    "sensor_err": 0x04,
+    "reader_slow": 0x08,
+}
+#: FT6 status bit1 is asserted once the quaternion age passes this bound.
+FEE_ST_FRESH_MS = 30
+
+
+def fee_diag_addr(personality: str = FEE_PERSONALITY_NATIVE) -> int:
+    """Address of the FeeTech 20-byte diagnostic block for a personality."""
+    return FEE_DIAG_ADDR_FT6 if personality == FEE_PERSONALITY_FT6 else FEE_DIAG_ADDR
+
+
+def fee_alt_addr(personality: str = FEE_PERSONALITY_NATIVE) -> int:
+    """Address of the *native* 20-byte block inside the FeeTech map."""
+    return FEE_TELEM_ALT_ADDR_FT6 if personality == FEE_PERSONALITY_FT6 else FEE_TELEM_ALT_ADDR
+
+
+def fee_ft6_status_names(status: int) -> list[str]:
+    """Decode an FT6 status byte into names.  No bit above 3 is ever set."""
+    return [name for name, bit in FEE_ST_BITS.items() if status & bit]
+
+
 TELEM_LEN = 20
 CTRL_LEN = 12
 #: Longest Dynamixel frame the scanner will believe: one status packet is at most
@@ -672,6 +714,7 @@ class Link:
         read_len: int = CTRL_LEN,
         mode: str = "sync_read",
         timeout: float = 0.05,
+        fee_personality: str = FEE_PERSONALITY_NATIVE,
     ) -> None:
         self.port = port
         self.baud = baud
@@ -680,6 +723,7 @@ class Link:
         self.read_len = read_len
         self.mode = mode
         self.timeout = timeout
+        self.fee_personality = fee_personality
         self.stats = LinkStats()
         self.decoder = ImuDecoder()
         self._ser = None
@@ -721,7 +765,20 @@ class Link:
     @property
     def telemetry_addr(self) -> int:
         """Address of the 20-byte diagnostic block this tool polls."""
-        return DXL_DIAG_ADDR if self.protocol == PROTO_DXL else FEE_DIAG_ADDR
+        if self.protocol == PROTO_DXL:
+            return DXL_DIAG_ADDR
+        return fee_diag_addr(self.fee_personality)
+
+    @property
+    def alt_addr(self) -> int:
+        """Address of the *native* 20-byte block inside the FeeTech map.
+
+        Under the ft6 personality that is 196, not 128: 124..143 is the FT6
+        diagnostic block and 128..143 would overlap it (docs §16).
+        """
+        if self.protocol == PROTO_DXL:
+            return DXL_TELEM_ADDR
+        return fee_alt_addr(self.fee_personality)
 
     @property
     def contract_addr(self) -> int:
@@ -731,6 +788,19 @@ class Link:
     @property
     def vendor_addr(self) -> int:
         return DXL_VENDOR_ADDR if self.protocol == PROTO_DXL else FEE_VENDOR_ADDR
+
+    def detect_fee_personality(self) -> str:
+        """Read registers 0..4 and store/return the FeeTech personality.
+
+        The identity window is the one thing a host can read before it decodes
+        telemetry, and it is the same gate the R17 runtime applies: an FT6 node
+        answers 06 00 00 00 F2.  Sets ``self.fee_personality``, which moves
+        ``telemetry_addr``/``alt_addr`` to their ft6 values.
+        """
+        identity = bytes(self.read_registers(0, 5))
+        self.fee_personality = (FEE_PERSONALITY_FT6 if identity == FEE_IDENTITY_FT6
+                                else FEE_PERSONALITY_NATIVE)
+        return self.fee_personality
 
     def _read_frame(self) -> bytes:
         """Read exactly one status/ack frame, tolerating debug text and noise."""
@@ -1137,6 +1207,19 @@ def _self_test() -> int:
     check("fee ping id=200", fee_ping(200).hex(" ").upper(), "FF FF C8 02 01 34")
     check("fee read 56/12", fee_read(200, 56, 12).hex(" ").upper(), "FF FF C8 04 02 38 0C ED")
     check("fee ack parse", fee_parse_ack(bytes.fromhex("FF FF C8 02 00 35")), (200, 0, b""))
+
+    # FeeTech personality: the addresses that move, and the second bit table.
+    # TELEM_FLAG_BITS is the native flags byte and must not be reused for these.
+    check("native diag addr", fee_diag_addr(FEE_PERSONALITY_NATIVE), 128)
+    check("ft6 diag addr", fee_diag_addr(FEE_PERSONALITY_FT6), 124)
+    check("native alias addr", fee_alt_addr(FEE_PERSONALITY_NATIVE), 128)
+    check("ft6 alias addr", fee_alt_addr(FEE_PERSONALITY_FT6), 196)
+    check("ft6 identity", FEE_IDENTITY_FT6.hex(" ").upper(), "06 00 00 00 F2")
+    check("ft6 status 0x00", fee_ft6_status_names(0x00), [])
+    check("ft6 status 0x0D", fee_ft6_status_names(0x0D),
+          ["not_ready", "sensor_err", "reader_slow"])
+    check("ft6 status ignores bits 4..7", fee_ft6_status_names(0xF0), [])
+    check("native flags table untouched", TELEM_FLAG_BITS["sflp_valid"], 0x01)
 
     # half precision, matching the firmware's f32_to_half
     check("half 1.0", "%04X" % float_to_half(1.0), "3C00")

@@ -1095,6 +1095,66 @@ static void test_telem_pack(void)
     check(blk[FEE_BLOCK_RESERVED] == 0U, "byte 14 is reserved and zero");
 }
 
+/* The FT6 contract's two wire forms are pure functions and are compiled into
+   both personalities, so their layouts are asserted here rather than only in
+   the register-image test (which needs the whole dev.c).  The truth table is
+   the one in docs/imu_to_dxl_protocol.md §16. */
+static void test_telem_pack_ft6(void)
+{
+    uint8_t telem[TELEM_LEN];
+    uint8_t blk[FEE_DIAG_LEN];
+    uint8_t i;
+
+    g_case = "fee ft6 56..70 block";
+    for (i = 0U; i < TELEM_LEN; i++) {
+        telem[i] = (uint8_t)(0x10U + i);
+    }
+    telem[TELEM_CNT] = 0xAAU;        /* the native counter must NOT be used */
+    telem[TELEM_STATUS] = 0x81U;     /* nor the native flags byte */
+
+    telem_pack_fee15_ft6(telem, blk, 0x42U, 0x08U);
+    check(memcmp(blk, telem, TELEM_CTRL_LEN) == 0, "first 12 bytes are the control block");
+    check(blk[FEE_BLOCK_CNT] == 0x42U, "byte 12 is the quaternion sequence");
+    check(blk[FEE_BLOCK_STATUS] == 0x08U, "byte 13 is the FT6 status byte");
+    check(blk[FEE_BLOCK_RESERVED] == 0U, "byte 14 is reserved and zero");
+    check(FEE_BLOCK_LEN == FEE_BLOCK_RESERVED + 1U, "the block is still 15 bytes");
+
+    g_case = "fee ft6 124..143 block";
+    telem_pack_fee_diag20(telem, blk, 0x11223344U, 0x0506U, 1U);
+    check(memcmp(blk, telem, TELEM_CTRL_LEN) == 0, "first 12 bytes are the control block");
+    check(blk[12] == 0x44U && blk[13] == 0x33U && blk[14] == 0x22U && blk[15] == 0x11U,
+          "bytes 12..15 are the sequence, u32 little endian");
+    check(blk[16] == 0x06U && blk[17] == 0x05U, "bytes 16..17 are the age, u16 little endian");
+    check(blk[18] == 1U, "byte 18 is ready = 1");
+    check(blk[19] == FEE_DIAG_SCHEMA, "byte 19 is schema = 1");
+    telem_pack_fee_diag20(telem, blk, 0U, 0U, 0U);
+    check(blk[18] == 0U, "byte 18 is ready = 0 for a not-ready sample");
+    check(blk[19] == 1U, "the schema is 1 either way");
+
+    g_case = "fee ft6 status truth table";
+    check(telem_fee_ft6_status(1U, 0U, 0U, 0U) == 0x00U, "ready, fresh, nothing new -> 0x00");
+    check(telem_fee_ft6_status(0U, 65535U, 0U, 0U) == FEE_ST_NOT_READY,
+          "not ready -> bit0 only");
+    check(telem_fee_ft6_status(1U, 31U, 0U, 0U) == FEE_ST_STALE,
+          "31 ms is past the 30 ms bound -> bit1");
+    check(telem_fee_ft6_status(1U, 30U, 0U, 0U) == 0x00U, "30 ms is still fresh (strictly greater)");
+    check(telem_fee_ft6_status(1U, 0U, 5U, 0U) == FEE_ST_READER_SLOW,
+          "five unread samples -> bit3");
+    check(telem_fee_ft6_status(1U, 0U, 4U, 0U) == 0x00U, "four do not");
+    check(telem_fee_ft6_status(1U, 0U, 0U, 1U) == FEE_ST_ERR, "sensor error -> bit2");
+    check(telem_fee_ft6_status(0U, 65535U, 9U, 1U) == 0x0DU, "all three -> 0x0D");
+    check((telem_fee_ft6_status(0U, 65535U, 9U, 1U) & 0xF0U) == 0U, "bits 4..7 stay zero");
+    check(telem_fee_ft6_status(1U, 65535U, 9U, 1U) == 0x0EU,
+          "stale + slow + error -> 0x0E, and never bit0 while ready");
+    for (i = 0U; i < 2U; i++) {
+        uint8_t ready = i;
+        uint8_t st = telem_fee_ft6_status(ready, 4000U, 7U, 1U);
+        check((st & 0xF0U) == 0U, "no input can set bits 4..7");
+        check((0U == ready) == ((st & FEE_ST_NOT_READY) != 0U),
+              "bit0 is exactly the inverse of ready");
+    }
+}
+
 static void test_sync_index(void)
 {
     fee_slave_t f;
@@ -1444,6 +1504,7 @@ int main(void)
     test_fee_sync();
     test_fee_reboot();
     test_telem_pack();
+    test_telem_pack_ft6();
     test_sync_index();
     test_bus_arb();
     test_slave_gap_reset();
