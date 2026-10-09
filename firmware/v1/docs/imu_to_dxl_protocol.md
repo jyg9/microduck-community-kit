@@ -579,10 +579,15 @@ CRC 错误时：若帧的 ID 是本机 ID，回一帧参数为空的 `ERR=0x20` 
 | 协议 | 地址 | 长度 | 内容 | 出处 |
 |---|---|---|---|---|
 | Dynamixel | **124..143** | **20** | 完整 20 字节块 | `src/board.h:449`、`src/dev.c:696` |
-| FeeTech（契约块） | **56..70** | **15** | 12 控制 + 计数 + 状态 + 保留 0 | `src/board.h:450,457-460`、`src/telem_pack.c:10-16` |
-| FeeTech（诊断别名） | **128..147** | **20** | 完整 20 字节块 | `src/board.h:451`、`src/dev.c:697` |
+| FeeTech（契约块） | **56..70** | **15** | 12 控制 + 计数 + 状态 + 保留 0 | `src/board.h:450,457-460`、`src/telem_pack.c` |
+| FeeTech（诊断别名） | **128..147** | **20** | 完整 20 字节块 | `src/board.h` `FEE_TELEM_NATIVE_ADDR`、`src/dev.c` |
 
-**FeeTech 15 字节契约块在 56 处**的精确布局（`src/telem_pack.c:10-16`）：
+> **本表与下面的块内布局描述的是 native 人格**（`-DFEE_IMU_PERSONALITY=native`；仓库当前
+> 默认构建是 ft6）。 FeeTech 侧还有一个编译期的
+> **ft6 人格**：它把契约块的计数/状态字节换成 FT6 语义，并把诊断块搬到 124、把上面的
+> 128 别名搬到 196。两种人格的完整映射见 **§16**；Dynamixel 侧两种人格完全相同。
+
+**FeeTech 15 字节契约块在 56 处**的精确布局（native 人格，`src/telem_pack.c`）：
 
 | FeeTech 地址 | 契约块内偏移 | 内容 |
 |---|---|---|
@@ -592,8 +597,8 @@ CRC 错误时：若帧的 ID 是本机 ID，回一帧参数为空的 `ERR=0x20` 
 | 62..63 | 6..7 | 四元数 X（half LE） |
 | 64..65 | 8..9 | 四元数 Y |
 | 66..67 | 10..11 | 四元数 Z |
-| **68** | **12** | 采样计数 `FEE_BLOCK_CNT` |
-| **69** | **13** | 状态位 `FEE_BLOCK_STATUS` |
+| **68** | **12** | 采样计数 `FEE_BLOCK_CNT`（每样本 +1；ft6 人格下是**四元数序号**） |
+| **69** | **13** | 状态位 `FEE_BLOCK_STATUS`（ft6 人格下是 **FT6 状态字节**，bit0 极性相反） |
 | **70** | **14** | **保留，恒 0** `FEE_BLOCK_RESERVED` |
 
 ### 6.3 为什么要有 15 字节契约块（以及主机在混合车队里的规则）
@@ -609,10 +614,16 @@ CRC 错误时：若帧的 ID 是本机 ID，回一帧参数为空的 `ERR=0x20` 
 > ≈4.9 ms 涨到 ≈5.7 ms，逼近 6 ms 验收线；而且"读超出文档块长"在别的型号/固件上不保证
 > （【实测+估算】`docs/bus_timing_borrow_plan.md:46-49,188`）。
 
-因为计数和状态必须塞进这 15 字节，**原始加速度放不下**，所以它只存在于 128 别名的 20 字节
-诊断块里（`src/board.h:453-456`、`docs/bus_timing_borrow_plan.md §0 D1`）。
+因为计数和状态必须塞进这 15 字节，**原始加速度放不下**，所以它只存在于 20 字节诊断块的
+别名里（`src/board.h` `FEE_TELEM_NATIVE_ADDR`、`docs/bus_timing_borrow_plan.md §0 D1`）：
+native 人格在 128，ft6 人格在 196（§16）。
 
 ### 6.4 flags 字节（块偏移 19）的每一位
+
+> **本表描述 native 人格的 flags 字节**（FeeTech 契约块偏移 13 = 地址 69、诊断块偏移 19、
+> Dynamixel 块偏移 19 都是它）。**ft6 人格下 FeeTech 契约块偏移 13 不是这个字节**，而是
+> FT6 状态字节（bit0 极性相反、bit3 含义不同），见 §16；native flags 字节在 ft6 人格下仍然
+> 存在于诊断块 124 的偏移 19 与 196 别名的偏移 19。
 
 | 位 | 值 | 名称 | 含义 | 谁置位 |
 |---|---|---|---|---|
@@ -625,7 +636,8 @@ CRC 错误时：若帧的 ID 是本机 ID，回一帧参数为空的 `ERR=0x20` 
 | bit6 | `0x40` | `TELEM_FLAG_CFG_DIRTY` | 配置未保存 | **当前固件从不置位**（常量在 `src/board.h:519`，`src/` 中无写入点） |
 | bit7 | `0x80` | `TELEM_FLAG_FUSION_OK` | **融合算法正在运行**（不是"已收敛"） | 真驱动传感器在线时（`src/imu_spi.c:603-610`）；模拟器（`src/imu_sim.c:103`） |
 
-各位的常量定义见 `src/board.h:512-520`、主机侧同一份表见 `host/bus.py:103-112`。
+各位的常量定义见 `src/board.h` `TELEM_FLAG_*`、主机侧同一份表见 `host/bus.py` `TELEM_FLAG_BITS`。
+ft6 人格的状态位是**另一张表**（`FEE_ST_*` / `host/bus.py` `FEE_ST_BITS`），不要混用（§16）。
 
 ### 6.5 四元数字节全 0 = 融合尚未收敛（主机必须保持上一有效值）
 
@@ -1243,6 +1255,12 @@ FF FF C8 11 00 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E BD
 校验和：`SUM = C8+11+00+(00+…+0E=0x69) = 0x142 → 0x42`，`~0x42 = 0xBD`。
 解码时第 13 字节（地址 68）= 采样计数、第 14 字节（69）= 状态位、第 15 字节（70）恒 0（§6.2）。
 
+**ft6 人格下同一个 56/15 事务的字节含义不同**（§16）：字节 12 = 四元数序号（u8，只随真实
+新四元数递增，255→0 回绕），字节 13 = FT6 状态字节（bit0 `0x01` = **未就绪**，与 native 的
+`TELEM_FLAG_SFLP_VALID` 极性相反；bit1 过期、bit2 错误、bit3 读取过慢；**bits4–7 恒 0**），
+字节 14 仍恒 0。例如"就绪且新鲜"的样本应答里字节 12/13 可能是 `2A 00`，而"主循环卡住 100 ms
+后仍在回包"会是 `2A 02` —— 后者正是 FT6 主机拒绝该块的原因（§16）。
+
 ### (b) Dynamixel 读 20 字节遥测窗（地址 124）
 
 请求（`dxl_read(200, 124, 20)`）：
@@ -1508,17 +1526,27 @@ Fee 数据帧：FF FF C8 13 03 F0 68 20 00 20 85 CB 00 08 CD CB 00 08 CD CB 00 0
 | 版本项 | 值 | 出处 |
 |---|---|---|
 | 固件版本常量（编进寄存器） | **1.0**（`FW_VERSION_MAJOR=1`、`MINOR=0`） | `src/board.h:49-50` |
-| Dynamixel 固件版本寄存器 6 | **`0x10`**（高半字节主、低半字节次） | `src/board.h:51-53`；`src/dev.c:154` |
-| FeeTech 固件版本寄存器 0/1 | **1 / 0** | `src/dev.c:190-191` |
+| Dynamixel 固件版本寄存器 6 | **`0x10`**（高半字节主、低半字节次）**两种人格相同** | `src/board.h:51-53`；`src/dev.c:154` |
+| FeeTech 固件版本寄存器 0/1 | native：**1 / 0**；ft6：**6 / 0** | `src/board.h` `FEE_ID_FW_MAJOR/MINOR` |
+| FeeTech 型号寄存器 3/4 | native：**`49 4D`**（`0x4D49`）；ft6：**`00 F2`**（`0xF200`） | `src/board.h` `FEE_MODEL_NUMBER` |
 | `APP_VERSION` 宏默认 | `APP_VERSION_MAKE(1,0,0)` = `0x1000` | `src/board.h:153` |
-| **升级镜像头版本（当前构建产物）** | **1.2.0**（`image_version = 4608 = 0x1200`，`image_size = 24712`，`payload_crc32 = 0xF68DF42D`，`flags = 1` trial） | `build/gd32f303cc_imu_to_dxl_slot_a.json`；`build/CMakeCache.txt:21`（`APP_VERSION_STR=1.2.0`） |
-| 打包工具默认版本 | 字符串 `APP_VERSION_STR`，CMake 默认 `"1.0.0"` | `CMakeLists.txt:71,252` |
+| **升级镜像头版本（构建选项）** | `APP_VERSION_STR`，**按人格取默认值**：native `1.5.1`、ft6 `1.6.0`（`-DAPP_VERSION_STR` 可覆盖；只能是数字） | `CMakeLists.txt` 的 `_app_version_default` |
+| 打包工具版本参数 | 字符串 `APP_VERSION_STR`，`host/package.py pack --version` 只接受 `major[.minor[.patch]]` 数字 | `CMakeLists.txt` 打包步骤 |
 
 > **注意**：`image_version` 由打包工具 `host/package.py pack --version ${APP_VERSION_STR}`
 > 写进 64 字节应用头（`CMakeLists.txt:252`），而 Dynamixel 寄存器 6 / FeeTech 寄存器 0/1
-> 来自 `src/board.h` 的 `FW_VERSION_*`。两者是**独立的两个版本来源**，可以不一致；当前仓库
-> 构建产物就是"寄存器 1.0 / 镜像头 1.2.0"。主机做版本决策时以身份窗的 `image_version`
+> 来自 `src/board.h` 的 `FW_VERSION_*`（ft6 人格的 6/0 来自独立的 `FEE_ID_FW_*`）。
+> 两者是**独立的两个版本来源**，可以不一致。主机做版本决策时以身份窗的 `image_version`
 > 为准（§9、§10.8）。
+>
+> **两种人格必须有不同的 `APP_VERSION_STR`**：`host/upgrade.py` 比较的是镜像头版本，同名同
+> 版本的不同镜像会被拒绝（需 `--force-same-version`），若被当成"更新"则会**静默替换人格**。
+> 所以 CMake 已按人格给默认值（native `1.5.1`、ft6 `1.6.0`，`-DAPP_VERSION_STR` 可覆盖）：
+> 切过去是一次正常升级，切回来是一次显式 `--allow-downgrade`。
+>
+> 版本号**不能带文字后缀**：它被写进 64 字节应用头的 u16 `image_version`，`host/package.py`
+> 的 `parse_version()` 对非数字分量直接报错（`1.5.1-ft6` → 打包失败）。要区分人格请看身份
+> 寄存器（§16.2）或构建目录名，不要指望版本字符串。
 
 ### 13.2 涉及的协议 / 格式版本
 
@@ -1695,8 +1723,8 @@ CLI 的 pty 端到端，173 断言）、`host/tools/test_crc16.c` / `test_crc32.
 | 1 | `UPG_END` 是否由节点写应用头 | "节点写 `app_header_t`（flags=TRIAL）"（`docs/flash_layout.md §5.3` 表格行） | "`UPG_END` **不重写**镜像头，节点只校验"（`docs/flash_layout.md §9.1`、`docs/upgrade.md:256-257`） | **不重写**（`src/boot_upgrade.c:280-288`） |
 | 2 | 升级会话超时与块 ACK 参数 | "500 ms 无完整帧 → STATUS=2；DXL 块 ACK 带 4 字节 `ack_seq,status,ack_crc`；Fee 带 2 字节"（`docs/flash_layout.md §5.3-5.5`） | — | 无 500 ms 超时（boot 模式靠 30 s idle，`src/boot_main.c:324-329`）；ACK 无额外参数，主机读状态窗；`UPG_ACK_CRC` 已被 `UPG_NODE_CRC`(227..230) 取代（`docs/flash_layout.md §9.1` 自己也这么修正了） |
 | 3 | `UPG_BLKLEN` 范围 | "1..16"（`docs/flash_layout.md §5.2`、`docs/upgrade.md §5.3`） | — | **4..16 且必须是 4 的倍数**（`src/board.h:267-268`、`src/boot_upgrade.c:472-478`）。**已修正**：这两处文档已改成 4..16。注意 readback（`UPG_CMD_READBACK`）确实接受 1..16，与块写不同 |
-| 4 | FeeTech 型号 | `0x0C00`（`飞特通讯协议说明.md §10.1`） | `0x4D49`（'I','M'）（`README.md:132`、`src/board.h:323-329`） | **`0x4D49`**（`src/dev.c:192`） |
-| 5 | FeeTech 地址 56 的块长 | "56~75 是 20 字节遥测块"（`飞特通讯协议说明.md §10.2`） | "56..70 是 15 字节契约块，完整 20 字节在 128"（`README.md:104-108`、`docs/bus_timing_borrow_plan.md §0 D1`） | **15 字节契约块**（`src/telem_pack.c:10-16`、`src/board.h:457-460`） |
+| 4 | FeeTech 型号 | `0x0C00`（`飞特通讯协议说明.md §10.1`） | `0x4D49`（'I','M'）（`README.md:132`、`src/board.h`） | **native 人格 `0x4D49`**（`src/dev.c` `put16(s_fee, 3U, FEE_MODEL_NUMBER)`）；**ft6 人格 `0xF200`**（§16） |
+| 5 | FeeTech 地址 56 的块长 | "56~75 是 20 字节遥测块"（`飞特通讯协议说明.md §10.2`） | "56..70 是 15 字节契约块，完整 20 字节在 128"（`README.md:104-108`、`docs/bus_timing_borrow_plan.md §0 D1`） | **15 字节契约块**（`src/telem_pack.c`、`src/board.h` `FEE_BLOCK_*`）。20 字节别名 native 在 128、ft6 在 196（§16） |
 | 6 | 协议粘滞窗口 | "1 秒内粘在该协议上"（`飞特通讯协议说明.md §9`） | "已从 1 s 改为 100 ms"（`README.md:416-417`、`docs/bus_timing_borrow_plan.md §7.2`） | **100 ms**（`src/bus.h:47`） |
 | 7 | FeeTech 自定义 STATUS 码 | "0x01 访问错误 / 0x02 越界 / 0x04 长度 / 0x08 其它"（`飞特通讯协议说明.md §10.4`） | "ACK STATUS 恒 0"（`README.md:133`、`src/fee.c:15-20`） | **恒 0**，错误只进 `V_LAST_ERR`（`src/fee.c:20-35`） |
 | 8 | hls 波特率码范围 | HLS 手册 0..7（`飞特通讯协议说明.md §8`） | 固件接受 0..11（`src/dev.c:76-79`） | `fee_baud_code_valid()` 接受 `<= 11`（`src/dev.c:600-605`） |
@@ -1710,6 +1738,213 @@ CLI 的 pty 端到端，173 断言）、`host/tools/test_crc16.c` / `test_crc32.
 
 ---
 
+## 16. FeeTech 人格开关（native / ft6）
+
+### 16.1 是什么，为什么是编译期的
+
+同一个节点固件可以编译出两种**FeeTech 侧线协议人格**：
+
+| 人格 | 含义 | 谁能读 |
+|---|---|---|
+| `ft6`（**当前默认**） | 与 Microduck-kissqy 的 FT6 节点（`firmware/imu-source`）在飞特总线上**逐字节兼容**；并带本板固定的安装朝向补偿（§16.7） | 发布的 R17 主机 `duck-control/src/feetech.rs`（`robotd`） |
+| `native` | 本仓库自己的契约，即 §6.2 描述的那一套 | microduck 原生主机（`microduck_ft1910` 的 SCS 后端等） |
+
+**只改 FeeTech 侧的寄存器映射与遥测投影。** Dynamixel 侧（协议 2.0）、总线时序、舵机交互、
+bootloader、配置页、升级协议在两种人格下**完全一致**，并且这一点是**被测试断言的**，不是
+约定：`host/tools/test_regmap.c` 在两种人格下分别构建，把 `dev_image(PROTO_DXL)[0..255]`
+与改动前的 native 金标逐字节比对。
+
+用编译期开关而不是运行期配置位，有三个理由：
+
+1. 主机在**身份门失败时根本不会打开总线**（R17 读到 `200@0/5 != 06 00 00 00 F2` 直接报
+   "ID 200 requires FT6 firmware"），所以运行期开关在实战中不可达；
+2. 56..70 这 15 字节没有余量，且 bit0 在两种契约里含义**相反**，一个块只能是一种语义；
+3. 本仓库既有风格就是这样（12 个 `CACHE STRING`，`build.sh` 专门打印）。
+
+```bash
+# ft6（默认，给 R17 机器人用）：镜像头版本自动 1.6.0，并带本板的安装朝向补偿
+BUILD_DIR=build-ft6 ./build.sh
+
+# native：务必用不同的 BUILD_DIR，两个镜像在总线上不通用，镜像头版本 1.5.1
+BUILD_DIR=build-native EXTRA_CMAKE_ARGS="-DFEE_IMU_PERSONALITY=native" ./build.sh
+```
+
+`APP_VERSION_STR` **按人格取默认值**（native `1.5.1` / ft6 `1.6.0`），可用 `-DAPP_VERSION_STR=…`
+覆盖。它只能是数字：升级镜像头里它是一个 u16（major 4 bit / minor 4 bit / patch 8 bit），
+`host/package.py` 与 `host/upgrade.py` 都按数字解析和比较，所以**加 `-ft6` 这类文字后缀会让
+打包直接失败**。人格在总线上另有更权威的标识：身份寄存器 0..4 就是 `06 00 00 00 F2`。
+
+CMake 选项：`FEE_IMU_PERSONALITY` = `native` | `ft6`（其它值 `FATAL_ERROR`），编译期宏
+为 `FEE_IMU_PERSONALITY_FT6` = 0 | 1（`CMakeLists.txt`、`src/board.h`）。仓库当前默认是
+`ft6`，所以裸跑 `./build.sh` 得到的就是 R17 能直接接受、且朝向已补偿的镜像。
+
+> **主机必须与人格匹配。** 没有自动协商：R17 主机不认识 native 节点，原生主机读 ft6 节点
+> 会把"未就绪"读成"有数据"（bit0 极性相反）。误刷的症状是主机报"IMU 未收敛/未就绪"，
+> 与真实 IMU 故障无法区分。`host/bus.py` 可用 `Link.detect_fee_personality()`（读 `0@5`）
+> 自行判别。
+
+### 16.2 两种人格的 FeeTech 寄存器映射
+
+| 地址 | 长度 | native（默认） | ft6 |
+|---|---|---|---|
+| 0..1 | 2 | `01 00`（`FW_VERSION_MAJOR/MINOR`） | `06 00`（`FEE_ID_FW_MAJOR/MINOR`） |
+| 2 | 1 | `00` | `00` |
+| 3..4 | 2 | `49 4D`（`0x4D49`） | `00 F2`（`0xF200`） |
+| 5 / 6 | 1 / 1 | 节点 ID / 波特率码（不变） | 同 |
+| 7 / 8 | 1 / 1 | 第二 ID = 254 / ACK 级别 = 1 | 同 |
+| 9..12 / 31 / 33 / 55 | — | 角度限位 / OFS / mode / 锁（不变） | 同 |
+| **56..70** | **15** | 契约块：12 控制 + `telem[18]` 采样计数 + `telem[19]` native flags + 0 | 契约块：12 控制 + **四元数序号 u8** + **FT6 状态字节** + 0 |
+| 71..123 | — | 空闲（0） | 空闲（0） |
+| **124..143** | **20** | 空闲（0） | **FT5/FT6 诊断块**：12 控制 + seq u32 LE + age u16 LE + ready + schema=1 |
+| **128..147** | 20 | native 20 字节块 | 空闲（0）——**但 128..143 已被 124 起的诊断块覆盖** |
+| 144..147 | — | （同上） | 空闲（0） |
+| 148..159 | — | 空闲（0） | 空闲（0） |
+| 160..179 | 20 | 厂商配置窗（不变） | 同 |
+| 180..195 | 16 | 身份窗（不变） | 同 |
+| **196..215** | **20** | 空闲（0） | **native 20 字节块**（原 128 的内容：含加速度与 native 计数/flags） |
+| 216..255 | — | 空闲（0） | 空闲（0） |
+
+两点容易踩：
+
+* **124..143 与老的 128 别名在 128..143 重叠**，所以 ft6 人格必须把 native 20 字节块搬到
+  196（196..215 在应用镜像里空闲，且 `a >= UID_WIN_ADDR` 使它天然只读，正是遥测该有的行为）。
+* 208..255 是 **bootloader** 的升级会话窗（§10.2）。它与 196..215 在**地址上**有 208..215 的
+  重叠，但两者属于**不同镜像**（app 与 boot 从不同时运行），所以功能上无冲突；这个重叠只是
+  地址空间上的巧合，不要据此把遥测读成升级数据。
+
+Dynamixel 侧两种人格完全相同：`124..143` = 20 字节 native 块，其余同 §6.2/§7.1。
+
+### 16.3 契约块偏移 12 / 13 的 ft6 语义
+
+| 偏移 | 地址 | 内容 |
+|---|---|---|
+| 12 | 68 | **四元数序号 u8**：只随*真实新四元数*递增，`255 → 0` 回绕。主机把它当"节点还在出数据"的证据：**连续 3 次读到相同值即判定过期并拒绝整块** |
+| 13 | 69 | **FT6 状态字节**（见下表） |
+| 14 | 70 | 保留，**恒 0**；主机要求 `== 0`，否则拒绝 |
+
+FT6 状态字节（`FEE_ST_*`，主机侧 `host/bus.py` `FEE_ST_BITS`）：
+
+| 位 | 值 | 名称 | 含义 |
+|---|---|---|---|
+| bit0 | `0x01` | `FEE_ST_NOT_READY` | **未就绪**（与 native `TELEM_FLAG_SFLP_VALID` 极性相反） |
+| bit1 | `0x02` | `FEE_ST_STALE` | 四元数年龄 > `FEE_ST_FRESH_MS`（30 ms）；仅在 ready 时才有意义 |
+| bit2 | `0x04` | `FEE_ST_ERR` | 传感器错误（本仓库取 `TELEM_FLAG_SENSOR_ERR`） |
+| bit3 | `0x08` | `FEE_ST_READER_SLOW` | 距上一次读取之间新增了 ≥ `FEE_ST_SLOW_SAMPLES`（5）个四元数 |
+| bits4–7 | — | — | **恒 0**，主机对非 0 直接报错 |
+
+R17 主机的判据（`duck-control/src/feetech.rs`）：
+
+```text
+raw[14] != 0 || raw[13] & 0xF0 != 0   -> 拒绝（块形状不对）
+ready = (raw[13] & 0x07) == 0         -> bit0/1/2 任一置位都算"未就绪"
+age_upper_bound = ready ? 30 : None   -> tx_us + 30 ms <= 50 ms 才新鲜
+sequence == 上次的 sequence           -> 连续 3 次相同即判 stale
+```
+
+**因此 bit3 是信息位**：它单独置位不会让主机拒绝（`0x08 & 0x07 == 0`），只是告诉主机"你读得
+太慢了"。而 bit1 必须在**发送时**计算：如果只在主循环里算，主循环卡住时串口仍在回包，节点
+会永远报新鲜——这正是这一位存在的意义。`src/dev.c` 的 `dev_read()` 因此在 ft6 人格下带一个
+O(1) 的读时刷新钩子（两次字节写 + 一次 u32 锁存），这是该函数"中断里不做活"规则的唯一例外。
+
+> **`V_REPORT_FRAME` 在 ft6 人格下被忽略。** 安装方向变换由 FT6 主机自己做
+> （`SflpDecoder::DEFAULT_MOUNT`），节点必须报 **chip frame**；`V_REPORT_FRAME=1`
+> （trunk-frame）是本仓库的 native 台架便利选项，在 ft6 下写入被接受但不生效——否则姿态会被
+> 旋转两次，而且方向不对不会有任何报错。配置页是两种人格共享的，所以启动时也会把从 flash
+> 读到的旧值强制归零。
+
+### 16.4 语义对照表（同一件事，两种人格怎么写）
+
+| 事实 | native 写法 | ft6 写法 |
+|---|---|---|
+| 本块带有效四元数 | `TELEM_FLAG_SFLP_VALID`(bit0)=1 | `raw[13] & 0x01 == 0`（未就绪位=0） |
+| 采样/姿态计数 | `telem[18]`，每样本 +1 | 偏移 12，只随新四元数 +1 |
+| 主循环卡住 | 无专位；靠四元数不变 + 主机自身的 stale 跟踪 | **发送时**算年龄，超过 30 ms 置 bit1 |
+| 主机读得太慢 | 无 | bit3 |
+| 完整 20 字节诊断块 | 地址 128 | 地址 124（seq u32 / age u16 / ready / schema=1） |
+| native 计数与 flags | 契约块偏移 12/13 | 仍在诊断块 124 偏移 18/19 与 196 别名里 |
+| 身份 | `01 00 00 49 4D`（+ ID/波特率码） | `06 00 00 00 F2`，并可连读 0..6 得 `06 00 00 00 F2 C8 00` |
+
+### 16.5 ft6 诊断块 124..143 的精确布局
+
+| 偏移 | 内容 |
+|---|---|
+| 0..11 | 与契约块相同的 12 控制字节（陀螺 + 四元数） |
+| 12..15 | 四元数序号，**u32 小端** |
+| 16..17 | 年龄（ms，**u16 小端**，饱和到 65535） |
+| 18 | ready：`1` = 就绪，`0` = 未就绪；主机要求它只能是 0 或 1 |
+| 19 | **schema = 1**（主机要求恰为 1） |
+
+`ready` 的判据与契约块一致：至少出过一次四元数**且**六字节不全为 0。年龄与契约块同源
+（同一个读时钩子刷新），所以两个块不会互相矛盾。
+
+### 16.6 实现与验证位置
+
+| 内容 | 位置 |
+|---|---|
+| 编译开关 | `CMakeLists.txt`（`FEE_IMU_PERSONALITY`）、`build.sh`（选项打印 + `BUILD_DIR` 覆盖） |
+| 人格常量 | `src/board.h`（`FEE_IMU_PERSONALITY_FT6`、`FEE_ID_FW_*`、`FEE_MODEL_NUMBER`、`FEE_ST_*`、`FEE_DIAG_*`、`FEE_TELEM_NATIVE_ADDR`） |
+| 两种 packer（**两种人格都编译**） | `src/telem_pack.c`：`telem_pack_fee15`、`telem_pack_fee15_ft6`、`telem_pack_fee_diag20`、`telem_fee_ft6_status` |
+| 四元数序号/年龄（门面，覆盖两个后端与全部模拟模式） | `src/imu.c`：`imu_quat_seq/ms/ready/age_ms` |
+| 映射分派、身份、读时刷新钩子、只读区、`V_REPORT_FRAME` 拒绝 | `src/dev.c` |
+| 安装朝向补偿 `FEE_IMU_PREMOUNT`（芯片系预旋转） | `CMakeLists.txt`、`src/board.h`、`src/imu.c` `imu_fee_control_block()` |
+| 逐字节金标 + 两种人格 DXL 不变式 | `host/tools/test_regmap.c`（`run_c_tests.sh` 两种人格各建一次） |
+| 打包器与状态真值表 | `host/tools/test_protocols.c` |
+| 主机工具 | `host/bus.py`（`FEE_IDENTITY_FT6`、`FEE_ST_BITS`、`fee_diag_addr()`、`Link.detect_fee_personality()`） |
+
+> `telem_pack.c` 保持"纯函数、无寄存器镜像、无硬件"，所以**人格选择不下沉到它内部**：两个
+> packer 都无条件编译，只有 `src/dev.c` 的调用点按 `#if` 选择。这样一个测试二进制就能同时
+> 覆盖两种布局。
+
+### 16.7 IMU 安装朝向补偿：`FEE_IMU_PREMOUNT`
+
+**分工先说清楚**：节点按设计报 **chip frame**（`FEE_IMU_PREMOUNT` 默认单位四元数时就是原始
+芯片坐标系），**安装旋转由主机做** —— R17 用机器人标定里的 `imu_mount_quat`，本仓库
+`host/bus.py` 用 `ImuDecoder(mount=…)`。所以"IMU 上下反了"通常是**节点这块板的 IMU 芯片朝向
+与主机标定所对应的原节点芯片朝向不同**。
+
+补偿可以放在两侧，二选一：
+
+| 做法 | 命令/文件 | 适用 |
+|---|---|---|
+| 主机侧重新标定（R17 原生机制） | `robotctl … verify-imu --mount-wxyz w x y z --confirmed`，写回 `/etc/robot/feetech-ft5/hd1910-calibration.toml`，热生效（会把 `motion_enabled` 置 false，需重新使能） | 每台单独标定；不想动固件 |
+| **节点侧预旋转（本节，已是 ft6 默认）** | 不用传参；需要改时用 `-DFEE_IMU_PREMOUNT="w,x,y,z"` | 标准转接件、所有机器一样；主机**沿用出厂标定**、节点做 drop-in |
+
+节点侧做的是**芯片系**上的小变换，只作用于飞特侧那两块：
+
+```text
+q_out = q_chip ⊗ C          (四元数，右乘)
+g_out = C ⊗ g_chip ⊗ C⁻¹    (陀螺，共轭；加速度/计数/flags 不转)
+```
+
+Dynamixel 124 与飞特 196 别名**保持原始 chip frame**（所以"两种人格 DXL 逐字节相同"的不变式
+继续成立）；六字节全 0（融合未收敛）时不做旋转，避免把"没有姿态"变成一个假姿态。
+
+**本板的情形：芯片绕封装法线翻转 180°（mark 点由朝上变朝下）。** 这时**X、Y 两个面内轴都
+反向、Z 不变**，即 C = `[0,0,0,1]` —— 这就是 **ft6 人格的默认值**，因此：
+
+```bash
+BUILD_DIR=build-ft6 ./build.sh        # 已经带补偿，不用任何额外参数
+```
+
+只有当你把这块板装成与原 FT6 节点芯片同向时，才需要显式关掉它：
+
+```bash
+BUILD_DIR=build-flat EXTRA_CMAKE_ARGS='-DFEE_IMU_PREMOUNT=1,0,0,0' ./build.sh   # 单位四元数=不转
+```
+
+判据来自实测：两块板的标定值相差 **179.86°，轴 ≈ (0, −0.05, +1)**（几乎是纯 Z）；若不做补偿，
+主机解出的误差是 **180.00°、轴 (0.995, −0.104, 0.014) —— 轴水平**，所以症状是"上下反了"，
+而不是朝向偏。加 `C = [0,0,0,1]` 后链条闭合到原节点：`q_chip ⊗ C ⊗ M⁻¹ = q_orig ⊗ M⁻¹`。
+
+**验收**：机器人摆成水平 HOME 姿态时，主机解出的 `gravity` 应为 (0, 0, −1)（R17 的
+`robot.busStatus`；或 `host/bus.py` 的 `ImuDecoder`）。若仍差半圈，说明翻转轴不是芯片 Z：
+180° 旋转在标量在前的四元数里 w = 0，所以三个候选是绕 X `0,1,0,0`、绕 Y `0,0,1,0`、绕 Z
+`0,0,0,1`（`1,0,0,0` 是单位旋转，等于不转）。真正的轴看芯片的机械朝向：绕封装法线转就是 Z，
+把芯片"翻个面"才是绕 X 或 Y。
+
+---
+
 *本文只描述协议。固件源码结构、LSM6DSV16X 寄存器编程、构建/烧录步骤与内部设计动机不在本文
 范围内；需要时请查阅仓库内对应文档（`docs/dynamixel_slave.md`、`docs/upgrade.md`、
-`docs/flash_layout.md`、`docs/bus_timing_borrow_plan.md`、`README.md`），但本文不依赖它们。*
+`docs/flash_layout.md`、`docs/bus_timing_borrow_plan.md`、`README.md`），但本文不依赖它们。
+§16 的人格开关是唯一的例外：它同时是协议选择，所以构建方式也写在这里。*
