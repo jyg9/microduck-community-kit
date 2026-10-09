@@ -5,169 +5,6 @@
 	(uuid "a79f0eb0-f7ac-4dcc-a0f1-bbbba017c1ff")
 	(paper "A4")
 	(lib_symbols
-		(symbol "microduck:A2007WR-3P"
-			(exclude_from_sim no)
-			(in_bom yes)
-			(on_board yes)
-			(property "Reference" "CN?"
-				(at 0 0 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-				)
-			)
-			(property "Value" "A2007WR-3P"
-				(at 0 0 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-				)
-			)
-			(property "Footprint" "microduck:CONN-TH_A2007WR-3P"
-				(at 0 0 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(hide yes)
-				)
-			)
-			(property "Datasheet" ""
-				(at 0 0 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(hide yes)
-				)
-			)
-			(property "Description" ""
-				(at 0 0 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(hide yes)
-				)
-			)
-			(property "Manufacturer Part" "A2007WR-3P"
-				(at 0 0 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(hide yes)
-				)
-			)
-			(property "Manufacturer" "CJT(长江连接器)"
-				(at 0 0 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(hide yes)
-				)
-			)
-			(property "Supplier Part" "C225350"
-				(at 0 0 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(hide yes)
-				)
-			)
-			(property "Supplier" "LCSC"
-				(at 0 0 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(hide yes)
-				)
-			)
-			(symbol "A2007WR-3P_0_0"
-				(rectangle
-					(start -3.81 5.08)
-					(end 6.35 -5.08)
-					(stroke
-						(width 0.254)
-						(type solid)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(circle
-					(center -2.54 3.81)
-					(radius 0.254)
-					(stroke
-						(width 0.254)
-						(type solid)
-					)
-					(fill
-						(type outline)
-					)
-				)
-				(pin unspecified line
-					(at -6.35 2.54 0)
-					(length 2.54)
-					(name "1"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(number "1"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-				)
-				(pin unspecified line
-					(at -6.35 0 0)
-					(length 2.54)
-					(name "2"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(number "2"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-				)
-				(pin unspecified line
-					(at -6.35 -2.54 0)
-					(length 2.54)
-					(name "3"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(number "3"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-				)
-			)
-			(embedded_fonts no)
-		)
 		(symbol "microduck:B3B-EH-A (LF)(SN)"
 			(exclude_from_sim no)
 			(in_bom yes)
@@ -1115,6 +952,16 @@
 		)
 		(uuid "58957a68-6e35-4310-b1b5-1beb6a9fe3d5")
 	)
+	(text "上一版本发现正面焊接卧式插座(CN2、CN4)，与鸭脖子舵机有少许干涉\n改为背面立式插座，正面舵机线束需要绕到背面插上"
+		(exclude_from_sim no)
+		(at 124.968 98.806 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+		)
+		(uuid "5d7a110e-5b0f-4fe8-9c33-f74e49c414b2")
+	)
 	(text "XL330接口(二选一)"
 		(exclude_from_sim no)
 		(at 175.768 54.864 0)
@@ -1506,6 +1353,79 @@
 			(justify left bottom)
 		)
 		(uuid "fbdad943-767f-45ed-81d7-77bc2d6785ea")
+	)
+	(symbol
+		(lib_id "microduck:B3B-PH-K-S(LF)(SN)")
+		(at 149.86 86.36 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "06165f58-0711-4488-8e03-08281abb51fd")
+		(property "Reference" "CN4"
+			(at 153.67 85.0899 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "B3B-PH-K-S(LF)(SN)"
+			(at 153.67 87.6299 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "microduck:CONN-TH_B3B-PH-K-S"
+			(at 149.86 86.36 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" ""
+			(at 149.86 86.36 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" ""
+			(at 149.86 86.36 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "3"
+			(uuid "167930e9-11f8-4700-ba48-2242a96a41e0")
+		)
+		(pin "2"
+			(uuid "5e0cc036-4f1d-4955-9529-1d9ee972a799")
+		)
+		(pin "1"
+			(uuid "b9aa005d-fec6-4179-ae2e-119a1613d4a0")
+		)
+		(instances
+			(project "dxl_hub"
+				(path "/a79f0eb0-f7ac-4dcc-a0f1-bbbba017c1ff"
+					(reference "CN4")
+					(unit 1)
+				)
+			)
+		)
 	)
 	(symbol
 		(lib_id "microduck:cape")
@@ -2367,115 +2287,6 @@
 		)
 	)
 	(symbol
-		(lib_id "microduck:A2007WR-3P")
-		(at 106.68 86.36 0)
-		(unit 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "6c65eabf-8627-4c65-bb3c-c9dc6895c147")
-		(property "Reference" "CN2"
-			(at 114.3 85.0899 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "A2007WR-3P"
-			(at 114.3 87.6299 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "microduck:CONN-TH_A2007WR-3P"
-			(at 106.68 86.36 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Datasheet" ""
-			(at 106.68 86.36 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Description" ""
-			(at 106.68 86.36 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Manufacturer Part" "A2007WR-3P"
-			(at 106.68 86.36 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Manufacturer" "CJT(长江连接器)"
-			(at 106.68 86.36 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Supplier Part" "C225350"
-			(at 106.68 86.36 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Supplier" "LCSC"
-			(at 106.68 86.36 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(pin "1"
-			(uuid "57e37881-5241-494f-ba4d-c980cff7f967")
-		)
-		(pin "3"
-			(uuid "2091fa78-ca06-4e33-aed1-b844543d706d")
-		)
-		(pin "2"
-			(uuid "0c3cd13e-91be-49c3-af35-d6ceefdbdbe5")
-		)
-		(instances
-			(project "dxl_hub"
-				(path "/a79f0eb0-f7ac-4dcc-a0f1-bbbba017c1ff"
-					(reference "CN2")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
 		(lib_id "power:+BATT")
 		(at 137.16 86.36 90)
 		(unit 1)
@@ -3021,17 +2832,17 @@
 		)
 	)
 	(symbol
-		(lib_id "microduck:A2007WR-3P")
-		(at 151.13 86.36 0)
+		(lib_id "microduck:B3B-PH-K-S(LF)(SN)")
+		(at 105.41 86.36 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
 		(on_board yes)
 		(dnp no)
 		(fields_autoplaced yes)
-		(uuid "98cc8f16-5ace-492c-b3bd-8a1e63ec5355")
-		(property "Reference" "CN4"
-			(at 158.75 85.0899 0)
+		(uuid "9a3d8ac3-fc58-491b-99bc-eebe4202f367")
+		(property "Reference" "CN2"
+			(at 109.22 85.0899 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3039,8 +2850,8 @@
 				(justify left)
 			)
 		)
-		(property "Value" "A2007WR-3P"
-			(at 158.75 87.6299 0)
+		(property "Value" "B3B-PH-K-S(LF)(SN)"
+			(at 109.22 87.6299 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3048,8 +2859,8 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "microduck:CONN-TH_A2007WR-3P"
-			(at 151.13 86.36 0)
+		(property "Footprint" "microduck:CONN-TH_B3B-PH-K-S"
+			(at 105.41 86.36 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3058,7 +2869,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 151.13 86.36 0)
+			(at 105.41 86.36 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3067,63 +2878,27 @@
 			)
 		)
 		(property "Description" ""
-			(at 151.13 86.36 0)
+			(at 105.41 86.36 0)
 			(effects
 				(font
 					(size 1.27 1.27)
 				)
 				(hide yes)
 			)
-		)
-		(property "Manufacturer Part" "A2007WR-3P"
-			(at 151.13 86.36 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Manufacturer" "CJT(长江连接器)"
-			(at 151.13 86.36 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Supplier Part" "C225350"
-			(at 151.13 86.36 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Supplier" "LCSC"
-			(at 151.13 86.36 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(pin "1"
-			(uuid "9df99551-9740-4809-a73a-bcffdd4b7dbf")
 		)
 		(pin "3"
-			(uuid "90127530-a09c-4e33-a366-d5f3be85ff2b")
+			(uuid "784c3059-84e5-4db0-b3fc-423bc7976040")
 		)
 		(pin "2"
-			(uuid "26867f38-97ea-42c4-b8c0-2f44d511ec9b")
+			(uuid "28c61b3b-e466-4a64-99f7-2aa637a420f3")
+		)
+		(pin "1"
+			(uuid "92e3b51c-de49-4a73-ac56-b5e2b2232766")
 		)
 		(instances
 			(project "dxl_hub"
 				(path "/a79f0eb0-f7ac-4dcc-a0f1-bbbba017c1ff"
-					(reference "CN4")
+					(reference "CN2")
 					(unit 1)
 				)
 			)
