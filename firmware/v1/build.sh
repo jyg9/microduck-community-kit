@@ -22,6 +22,16 @@
 #   EXTRA_CMAKE_ARGS="-DSYS_CLK_SOURCE=IRC8M" ./build.sh
 #   EXTRA_CMAKE_ARGS="-DAPP_VERSION_STR=1.2.3" ./build.sh
 #
+# The FeeTech personality is a build-time choice (docs/imu_to_dxl_protocol.md
+# §16): ft6 (the R17-compatible node, with this board's mounting compensation) is
+# the default, native is this repository's own contract.  The two images are
+# *not* interchangeable on the bus, so give each its own BUILD_DIR, or the second
+# build silently overwrites the first:
+#   BUILD_DIR=build-ft6 ./build.sh                                                  # v1.6.0
+#   BUILD_DIR=build-native EXTRA_CMAKE_ARGS="-DFEE_IMU_PERSONALITY=native" ./build.sh  # v1.5.1
+# APP_VERSION_STR defaults per personality (the image version is a number in the
+# app header - a text label cannot go there); override it for a release line.
+#
 # Serial port / baud for the motor bus (this node and the servos share it):
 #   BUS_PORT=/dev/ttyACM0 BUS_BAUD=1000000 ./build.sh smoke    # bench / PCBA
 #   BUS_PORT=/dev/ttyS2   BUS_BAUD=1000000 ./build.sh status   # on the robot
@@ -42,7 +52,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-BUILD_DIR=build
+BUILD_DIR="${BUILD_DIR:-build}"
 TOOLCHAIN=cmake/gd32_toolchain.cmake
 ELF=${BUILD_DIR}/gd32f303cc_imu_to_dxl
 BOOT_ELF=${BUILD_DIR}/gd32f303cc_imu_to_dxl_boot
@@ -96,13 +106,21 @@ configure_build() {
     # BUS_MIRROR_ENABLE defaulted to 0 would still be a bench (mirror) build
     # without saying so.
     local k
-    for k in APP_SLOT APP_VERSION_STR BOOT_ENABLE DBG_ENABLE BUS_MIRROR_ENABLE IMU_USE_SPI; do
+    for k in APP_SLOT APP_VERSION_STR BOOT_ENABLE DBG_ENABLE BUS_MIRROR_ENABLE IMU_USE_SPI \
+             FEE_IMU_PERSONALITY FEE_IMU_PREMOUNT; do
         printf '  %-18s %s\n' "${k}" \
             "$(sed -n "s/^${k}:[^=]*=//p" "${BUILD_DIR}/CMakeCache.txt")"
     done
     if grep -q '^BUS_MIRROR_ENABLE:[^=]*=1' "${BUILD_DIR}/CMakeCache.txt"; then
         echo "  NOTE bench build: USART0 also answers protocol frames."
         echo "       The upgrade session is still refused there (motor bus only)."
+    fi
+    if grep -q '^FEE_IMU_PERSONALITY:[^=]*=ft6' "${BUILD_DIR}/CMakeCache.txt"; then
+        echo "  NOTE ft6 personality: the FeeTech map speaks the FT6 node contract."
+        echo "       A native host (docs/imu_to_dxl_protocol.md §16) must be built"
+        echo "       for it too; Dynamixel protocol 2.0 is unchanged."
+        printf '  %-18s %s\n' "  → pre-rotation" \
+            "$(sed -n 's/^FEE_IMU_PREMOUNT:[^=]*=//p' "${BUILD_DIR}/CMakeCache.txt")"
     fi
 
     cmake --build "${BUILD_DIR}" -j"$(nproc)"

@@ -33,6 +33,19 @@ cmake_minimum_required(VERSION 3.10)
 #   STATUS_LED_ENABLE 1 = PB5 heartbeat LED (development board)
 #   CFG_FLASH_ENABLE  1 = persist id/baud/sim settings in the last flash page
 #   TEMP_SENSOR_ENABLE 1 = read the on-chip temperature sensor
+#   IMU_USE_SPI       1 = LSM6DSV16X on SPI0, 0 = the simulator
+#   FEE_IMU_PERSONALITY
+#                     ft6    = byte-compatible with the FT6 node contract
+#                              (default: what an R17 robot needs),
+#                     native = this repository's own FeeTech contract.
+#                     FeeTech map only; the Dynamixel map is identical in both.
+#                     Use a separate BUILD_DIR per personality: the two images
+#                     are not interchangeable on the bus.
+#   FEE_IMU_PREMOUNT  ft6 only: chip-frame rotation "w,x,y,z" for the FeeTech
+#                     blocks.  Defaults to this board's mounting (0,0,0,1: the
+#                     IMU chip turned 180 deg about its package normal, relative
+#                     to the FT6 node's chip).  [1,0,0,0] publishes the raw chip
+#                     frame, for a board mounted like the original node.
 # ---------------------------------------------------------------------------
 
 project(gd32f303cc_imu_to_dxl C ASM)
@@ -68,13 +81,91 @@ endif()
 set(APP_SLOT "0" CACHE STRING "0 = plain image, 1 = slot A, 2 = slot B")
 set_property(CACHE APP_SLOT PROPERTY STRINGS 0 1 2)
 set(BOOT_ENABLE "1" CACHE STRING "also build the bootloader and the two slot images")
-set(APP_VERSION_STR "1.5.1" CACHE STRING "image version stamped into the slot header")
 set(DBG_ENABLE "0" CACHE STRING "debug console on USART0")
 set(BUS_MIRROR_ENABLE "0" CACHE STRING "USART0 doubles as a bus port (bench only)")
 set(STATUS_LED_ENABLE "1" CACHE STRING "PB5 heartbeat LED")
 set(CFG_FLASH_ENABLE "1" CACHE STRING "persist configuration in the last flash page")
 set(TEMP_SENSOR_ENABLE "1" CACHE STRING "read the on-chip temperature sensor")
 set(IMU_USE_SPI "1" CACHE STRING "1 = LSM6DSV16X on SPI0, 0 = the simulator")
+
+# ---- FeeTech personality ---------------------------------------------------
+# Two build-time personalities for the *FeeTech* map only.  The Dynamixel map is
+# the same in both: the node's protocol 2.0 answers must not depend on a choice
+# the motor bus never sees.  See docs/imu_to_dxl_protocol.md §16.
+#
+# Decoded before APP_VERSION_STR because the two personalities need different
+# image versions by default - see below.
+set(FEE_IMU_PERSONALITY "ft6" CACHE STRING
+    "FeeTech side personality: native = this repository's own contract, ft6 = FT6-compatible node")
+set_property(CACHE FEE_IMU_PERSONALITY PROPERTY STRINGS native ft6)
+
+if(FEE_IMU_PERSONALITY STREQUAL "native")
+    set(FEE_IMU_PERSONALITY_FT6_VAL 0)
+elseif(FEE_IMU_PERSONALITY STREQUAL "ft6")
+    set(FEE_IMU_PERSONALITY_FT6_VAL 1)
+else()
+    message(FATAL_ERROR
+        "FEE_IMU_PERSONALITY must be native or ft6, got '${FEE_IMU_PERSONALITY}'")
+endif()
+
+# The image version is a number end to end - it is packed into a u16 in the app
+# header (major 4 bit, minor 4 bit, patch 8 bit) and host/upgrade.py compares it
+# to decide update vs downgrade - so it cannot carry a text label.  What it can
+# do is differ per personality, and it must: two different images sharing one
+# version make upgrade.py refuse the flash, or worse, adopt it as an ordinary
+# update and silently replace the personality.  Native keeps the historical
+# 1.5.1; ft6 gets its own.  Override with -DAPP_VERSION_STR=... if a release
+# line needs its own numbering.
+if(FEE_IMU_PERSONALITY STREQUAL "ft6")
+    set(_app_version_default "1.6.0")
+else()
+    set(_app_version_default "1.5.1")
+endif()
+set(APP_VERSION_STR "${_app_version_default}" CACHE STRING
+    "image version stamped into the slot header (defaults per FeeTech personality)")
+
+# ---- FeeTech-side chip-frame rotation (ft6 only) ---------------------------
+# The FT6 host owns the mounting rotation: it applies the robot's stored
+# `imu_mount_quat` to whatever the node reports, and this node reports chip
+# frame.  A board whose IMU chip sits in a different orientation than the
+# original FT6 node's chip must therefore compensate here, or the host's
+# (correct, robot-specific) calibration lands the attitude half a turn out.
+#
+# Default: this board's mounting.  The IMU chip is rotated 180 degrees about its
+# package normal relative to the FT6 node's chip (the marking dot ends up on the
+# other side), so the in-plane X and Y axes flip and Z stays - "0,0,0,1".  That
+# restores the chip frame the original node produced, which is why an unmodified
+# robot needs no recalibration.  "1,0,0,0" is the identity (raw chip frame), for
+# a board mounted like the original node; any other mounting can be passed the
+# same way.  See docs/imu_to_dxl_protocol.md §16.7.
+if(FEE_IMU_PERSONALITY STREQUAL "ft6")
+    set(_pm_default "0,0,0,1")
+else()
+    set(_pm_default "")
+endif()
+set(FEE_IMU_PREMOUNT "${_pm_default}" CACHE STRING
+    "ft6 personality: chip-frame rotation 'w,x,y,z' for the FeeTech blocks (default 0,0,0,1 = this board's mounting)")
+
+if(FEE_IMU_PREMOUNT)
+    string(REPLACE "," ";" _pm_list "${FEE_IMU_PREMOUNT}")
+    list(LENGTH _pm_list _pm_n)
+    if(NOT _pm_n EQUAL 4)
+        message(FATAL_ERROR
+            "FEE_IMU_PREMOUNT must be four comma-separated numbers 'w,x,y,z', got '${FEE_IMU_PREMOUNT}'")
+    endif()
+    foreach(_i RANGE 0 3)
+        list(GET _pm_list ${_i} _pm_${_i})
+        string(STRIP "${_pm_${_i}}" _pm_${_i})
+        if("${_pm_${_i}}" STREQUAL "")
+            message(FATAL_ERROR "FEE_IMU_PREMOUNT has an empty component: '${FEE_IMU_PREMOUNT}'")
+        endif()
+    endforeach()
+else()
+    set(_pm_0 1)
+    set(_pm_1 0)
+    set(_pm_2 0)
+    set(_pm_3 0)
+endif()
 
 function(ldscript_for_slot slot out)
     if(slot STREQUAL "0")
@@ -206,6 +297,11 @@ function(add_firmware target slot)
         CFG_FLASH_ENABLE=${CFG_FLASH_ENABLE}
         TEMP_SENSOR_ENABLE=${TEMP_SENSOR_ENABLE}
         IMU_USE_SPI=${IMU_USE_SPI}
+        FEE_IMU_PERSONALITY_FT6=${FEE_IMU_PERSONALITY_FT6_VAL}
+        FEE_IMU_PREMOUNT_QW=${_pm_0}
+        FEE_IMU_PREMOUNT_QX=${_pm_1}
+        FEE_IMU_PREMOUNT_QY=${_pm_2}
+        FEE_IMU_PREMOUNT_QZ=${_pm_3}
     )
 
     target_compile_options(${target} PRIVATE

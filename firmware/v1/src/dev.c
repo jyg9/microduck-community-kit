@@ -186,9 +186,11 @@ static void images_build(void)
     /* ---- FeeTech: HLS memory table layout --------------------------------- */
     /* 0/1 = firmware version (major, minor).  A real HD-1910 reports 3.46 here;
        reporting 0.0 said nothing at all, and "don't pretend to be a servo" is
-       why the model below is an unmistakable value. */
-    s_fee[0] = FW_VERSION_MAJOR;
-    s_fee[1] = FW_VERSION_MINOR;
+       why the model below is an unmistakable value (native) or the FT6 node's
+       own 0xF200 (ft6 personality, where the R17 host compares 0..6 as one
+       fixed table).  See docs/imu_to_dxl_protocol.md §16. */
+    s_fee[0] = FEE_ID_FW_MAJOR;
+    s_fee[1] = FEE_ID_FW_MINOR;
     put16(s_fee, 3U, FEE_MODEL_NUMBER);
     s_fee[5] = s_cfg.fee_id;
     s_fee[6] = s_cfg.fee_baud_code;
@@ -239,11 +241,21 @@ static void vendor_apply(uint8_t proto)
     if (v > 5000U) { v = 5000U; }
     if (v != s_cfg.sim_freq) { s_cfg.sim_freq = v; s_cfg_seq++; }
 
+#if FEE_IMU_PERSONALITY_FT6
+    /* Chip frame is part of the FT6 contract: the R17 host applies the mounting
+       rotation itself (SflpDecoder::DEFAULT_MOUNT), and the FT6 node reports raw
+       chip frame.  Trunk-frame mode is this repository's bench convenience, so
+       it is refused here rather than silently double-rotating the attitude. */
+    if (w[V_REPORT_FRAME] <= 1U) {
+        w[V_REPORT_FRAME] = 0U;   /* reads back as what is actually reported */
+    }
+#else
     if (w[V_REPORT_FRAME] <= 1U && w[V_REPORT_FRAME] != s_cfg.report_frame) {
         s_cfg.report_frame = w[V_REPORT_FRAME];
         imu_restart();
         s_cfg_seq++;
     }
+#endif
     if (w[V_PROTO_LOCK] <= PROTO_FEE && w[V_PROTO_LOCK] != s_cfg.proto_lock) {
         s_cfg.proto_lock = w[V_PROTO_LOCK];
         s_cfg_seq++;
@@ -645,7 +657,12 @@ static int ro_fee(uint16_t a)
     if (a <= 1U) { return 1; }                    /* firmware version */
     if (a >= 3U && a <= 4U) { return 1; }         /* model */
     if (a >= 56U && a <= 70U) { return 1; }       /* the 15-byte IMU block */
-    if (a >= 128U && a <= 147U) { return 1; }     /* telemetry alias */
+    if (a >= 128U && a <= 147U) { return 1; }     /* native telemetry alias */
+#if FEE_IMU_PERSONALITY_FT6
+    if (a >= FEE_DIAG_ADDR && a <= (FEE_DIAG_ADDR + FEE_DIAG_LEN - 1)) {
+        return 1;                                 /* FT6 diagnostic block */
+    }
+#endif
     /* vendor window 160..179: all writable, status/last-error ignored (see
        ro_dxl; vendor_sync() rewrites them from the real state) */
     return 0;
@@ -656,16 +673,69 @@ const uint8_t *dev_image(uint8_t proto)
     return (PROTO_DXL == proto) ? s_dxl : s_fee;
 }
 
+#if FEE_IMU_PERSONALITY_FT6
+/* ── the FT6 contract's read-time refresh ────────────────────────────────
+   The FT6 contract's counter and status bytes are only meaningful if the age is
+   bounded when the reply is *transmitted*.  Computing them in dev_refresh()
+   (the main loop) would let a stalled main loop keep reporting freshness - the
+   exact failure the byte exists to expose - so this is the one exception to
+   dev_read()'s "no work here" rule (see the comment in dev_read).  Cost: a few
+   byte stores and one 32-bit latch.  No ADC, no vendor-window rewrite. */
+static uint32_t s_fee_read_seq;
+static uint8_t  s_fee_read_latched;
+
+/* The FeeTech-side view of the block: the sensor bytes plus this personality's
+   extra chip-frame rotation.  Refreshed once per publish so the read-time hook
+   below only has to stamp the sequence, age and readiness - no float math in
+   the USART interrupt, and no torn read of the live sensor block either. */
+static uint8_t  s_fee_ctrl[TELEM_LEN];
+
+static void fee_contract_refresh(int fast_block)
+{
+    uint8_t  ready = imu_quat_ready();
+    uint32_t seq   = imu_quat_seq();
+    uint16_t age   = imu_quat_age_ms();
+    /* kissqy's FT6 computes new_samples against the PREVIOUS read and only then
+       records the current sequence - the order is the whole reader-slow rule */
+    uint32_t new_samples = (0U != s_fee_read_latched) ? (seq - s_fee_read_seq) : 0U;
+    uint8_t  st = telem_fee_ft6_status(ready, (uint32_t)age, new_samples,
+                                       (uint8_t)(imu_flags() & TELEM_FLAG_SENSOR_ERR));
+
+    /* the diagnostic block carries the same age, computed the same way */
+    telem_pack_fee_diag20(s_fee_ctrl, &s_fee[FEE_DIAG_ADDR], seq, age, ready);
+
+    if (!fast_block) {
+        /* 124..143 only: the reader-slow latch belongs to the 56/15 read, which
+           is what the runtime polls (kissqy notes it only on the compact read) */
+        return;
+    }
+    s_fee[FEE_TELEM_ADDR + FEE_BLOCK_CNT]    = (uint8_t)seq;
+    s_fee[FEE_TELEM_ADDR + FEE_BLOCK_STATUS] = st;
+    s_fee_read_seq = seq;          /* latch AFTER computing new_samples */
+    s_fee_read_latched = 1U;
+}
+#endif
+
 void dev_refresh(void)
 {
     const uint8_t *blk = imu_block_bytes();
     uint8_t temp;
     uint32_t primask;
+#if FEE_IMU_PERSONALITY_FT6
+    uint8_t fee_blk[TELEM_LEN];
+#endif
 
     /* The on-chip temperature is an ADC conversion plus a float divide (rate
        limited to 1 Hz inside dev_temp_celsius), so keep it out of the critical
        section below. */
     temp = (uint8_t)dev_temp_celsius();
+
+#if FEE_IMU_PERSONALITY_FT6
+    /* Same reason: the FeeTech personality's extra chip-frame rotation is float
+       math (a square root and a quaternion product), so it runs out here and
+       only the finished bytes are copied inside the critical section. */
+    imu_fee_control_block(fee_blk);
+#endif
 
     /* Publish under a short critical section.  dev_read() runs in the USART
        interrupt now - a frame's last byte has to become a reply within one
@@ -679,22 +749,42 @@ void dev_refresh(void)
        are writable on a real servo too (writes are ignored through ro_*) */
     put16(s_dxl, 0U, DXL_MODEL_NUMBER);
     s_dxl[6] = FW_VERSION_BYTE;
-    s_fee[0] = FW_VERSION_MAJOR;
-    s_fee[1] = FW_VERSION_MINOR;
+    s_fee[0] = FEE_ID_FW_MAJOR;
+    s_fee[1] = FEE_ID_FW_MINOR;
     put16(s_fee, 3U, FEE_MODEL_NUMBER);
 
     /* realtime tick: free-running ms, what a servo reports here */
     put16(s_dxl, 120U, (uint16_t)systick_get_ms());
 
-    /* Telemetry.  FeeTech 56..70 keeps the 15-byte servo shape with the counter
-       and status inside it, which is what the shared `sync_read` reads (15
-       bytes from the IMU node and from every servo); the raw accelerometer does
-       not fit there and lives in the 20-byte diagnostic block at 128.  The
-       Dynamixel map keeps the whole 20-byte block at 124, where the XL330 table
-       has room up to 143. */
+    /* Telemetry.  FeeTech 56..70 keeps the 15-byte servo shape, which is what
+       the shared `sync_read` reads (15 bytes from the IMU node and from every
+       servo); the raw accelerometer does not fit there and lives in the 20-byte
+       diagnostic block.  Which counter and status byte the FeeTech block
+       carries, and where the 20-byte block sits, is the personality's business
+       (docs/imu_to_dxl_protocol.md §16).  The Dynamixel map keeps the whole
+       20-byte block at 124 in both personalities - D4. */
+#if FEE_IMU_PERSONALITY_FT6
+    /* The FT6 status byte needs the age at *transmission*, so the values written
+       here are provisional: fee_contract_refresh() recomputes bytes 12/13 (and
+       refreshes the diagnostic block) whenever dev_read() serves that span.  A
+       publish-time status would keep reporting freshness after a stalled main
+       loop - the exact failure the byte exists to expose.
+
+       The bytes come from s_fee_ctrl, not from blk: that is the chip-frame block
+       with this personality's extra rotation applied, and the read-time hook
+       re-uses the same buffer. */
+    memcpy(s_fee_ctrl, fee_blk, TELEM_LEN);
+    telem_pack_fee15_ft6(s_fee_ctrl, &s_fee[FEE_TELEM_ADDR], (uint8_t)imu_quat_seq(),
+                         telem_fee_ft6_status(imu_quat_ready(),
+                                              (uint32_t)imu_quat_age_ms(), 0U,
+                                              (uint8_t)(imu_flags() & TELEM_FLAG_SENSOR_ERR)));
+    telem_pack_fee_diag20(s_fee_ctrl, &s_fee[FEE_DIAG_ADDR], imu_quat_seq(),
+                          imu_quat_age_ms(), imu_quat_ready());
+#else
     telem_pack_fee15(blk, &s_fee[FEE_TELEM_ADDR]);
+#endif
     memcpy(&s_dxl[DXL_TELEM_ADDR], blk, TELEM_LEN);
-    memcpy(&s_fee[FEE_TELEM_ALT_ADDR], blk, TELEM_LEN);
+    memcpy(&s_fee[FEE_TELEM_NATIVE_ADDR], blk, TELEM_LEN);
 
     /* This node has no pack divider, so it reports 0 V: microduck filters
        zeros out of the bus voltage average rather than believing a fake
@@ -725,6 +815,9 @@ void dev_note_error(uint8_t proto, uint8_t err)
 uint8_t dev_read(uint8_t proto, uint16_t addr, uint16_t len, uint8_t *out)
 {
     const uint8_t *img = (PROTO_DXL == proto) ? s_dxl : s_fee;
+#if FEE_IMU_PERSONALITY_FT6
+    int fast_block = 0;
+#endif
 
     if (0U == len) {
         return DXL_ERR_LENGTH;
@@ -732,10 +825,31 @@ uint8_t dev_read(uint8_t proto, uint16_t addr, uint16_t len, uint8_t *out)
     if (((uint32_t)addr + (uint32_t)len) > REG_SPACE_SIZE) {
         return DXL_ERR_RANGE;
     }
+#if FEE_IMU_PERSONALITY_FT6
+    /* The one exception to the rule below.  The FT6 contract's status byte is
+       only worth anything if the age is bounded at transmission: computed in
+       dev_refresh() (main loop) instead, a stalled main loop would keep
+       reporting freshness - which is the failure the byte exists to expose.
+       FeeTech only, so a Dynamixel read never enters here; no ADC, no
+       vendor-window rewrite. */
+    if (PROTO_FEE == proto) {
+        if ((addr <= (uint16_t)(FEE_TELEM_ADDR + FEE_BLOCK_STATUS))
+            && (((uint32_t)addr + (uint32_t)len) > (uint32_t)(FEE_TELEM_ADDR + FEE_BLOCK_CNT))) {
+            fast_block = 1;
+        }
+        if (fast_block
+            || ((addr <= (uint16_t)(FEE_DIAG_ADDR + FEE_DIAG_LEN - 1U))
+                && (((uint32_t)addr + (uint32_t)len) > (uint32_t)FEE_DIAG_ADDR))) {
+            fee_contract_refresh(fast_block);
+        }
+    }
+#endif
     /* No dev_refresh() here: this runs in the USART interrupt, where an ADC
        conversion and a vendor-window rewrite have no business.  The main loop
        publishes the image (dev_refresh) whenever a new sample exists, and
-       writes land in the image directly, so a read never needs to wait. */
+       writes land in the image directly, so a read never needs to wait.  The
+       FT6 personality refreshes two bytes of its contract block right here -
+       see above - and nothing else. */
     memcpy(out, &img[addr], len);
     return 0U;
 }
@@ -803,6 +917,12 @@ void dev_init(void)
 
     dev_cfg_defaults();
     (void)dev_cfg_from_flash();
+#if FEE_IMU_PERSONALITY_FT6
+    /* the configuration page is shared with the native personality, which may
+       have saved trunk-frame mode; the FT6 contract is chip frame (vendor_apply
+       refuses the write at runtime too) */
+    s_cfg.report_frame = 0U;
+#endif
     images_build();
 
 #if TEMP_SENSOR_ENABLE

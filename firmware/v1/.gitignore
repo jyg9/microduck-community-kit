@@ -1,5 +1,7 @@
-# build output
-build/
+# build output.  build-native/ and build-ft6/ are the documented
+# per-personality directories (docs/imu_to_dxl_protocol.md §16), so the
+# pattern covers the prefixed names too.
+build*/
 
 # host tool caches and scratch worktrees (never part of the deliverable)
 .uv-cache/

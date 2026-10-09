@@ -98,6 +98,85 @@
 #define IMU_USE_SPI             1
 #endif
 
+/* ── FeeTech personality (build-time; docs/imu_to_dxl_protocol.md §16) ─────
+   native = this repository's own contract; ft6 = byte-compatible with the FT6
+   node contract (Microduck-kissqy `firmware/imu-source`), which is what the
+   released R17 host (`duck-control/src/feetech.rs`) insists on.
+
+   This cannot be a runtime choice: the 15-byte block at 56..70 has no spare
+   room, bit 0 of its status byte means "has data" in one contract and "no data"
+   in the other, and the host refuses to open the bus at all when the identity
+   registers do not match.  The choice is therefore made where the host's is
+   made - at build time.
+
+   Only the FeeTech map moves.  The Dynamixel map, protocol 2.0, the bus timing,
+   the bootloader and the upgrade protocol are identical in both builds; that is
+   asserted by host/tools/test_regmap.c, not assumed. */
+#ifndef FEE_IMU_PERSONALITY_FT6
+#define FEE_IMU_PERSONALITY_FT6 0
+#endif
+
+#if (FEE_IMU_PERSONALITY_FT6 != 0) && (FEE_IMU_PERSONALITY_FT6 != 1)
+#error "FEE_IMU_PERSONALITY_FT6 must be 0 (native) or 1 (ft6)"
+#endif
+
+/* The FT6 wire constants are defined in *both* personalities: the FT6 packers
+   are compiled either way (telem_pack.c stays a pure, always-tested module) and
+   the host tests assert both layouts from one binary. */
+/* FT6 contract-block status byte (address 69 / block offset 13).  Bit 2 is the
+   error bit: the FT6 README defines it ("主控还拒绝 bit2 错误") and the host's
+   ready test is `(status & 0x07) == 0`, so any of bits 0..2 refuses the block.
+   Bits 4..7 must always be zero. */
+#define FEE_ST_NOT_READY        0x01u
+#define FEE_ST_STALE            0x02u
+#define FEE_ST_ERR              0x04u
+#define FEE_ST_READER_SLOW      0x08u
+#define FEE_ST_FRESH_MS         30u
+#define FEE_ST_SLOW_SAMPLES     5u
+/* FT5/FT6 diagnostic block: the 20-byte shape the host decodes at 124/20. */
+#define FEE_DIAG_ADDR           124
+#define FEE_DIAG_LEN            20
+#define FEE_DIAG_SCHEMA         1u
+
+#if FEE_IMU_PERSONALITY_FT6
+/* FT6 identity: registers 0..1 are the firmware version and 3..4 the model.
+   Deliberately *not* FW_VERSION_MAJOR/MINOR: those also drive the Dynamixel
+   version register, APP_VERSION and the compile-time app header default, and
+   D4 keeps protocol 2.0 byte-identical across personalities. */
+#define FEE_ID_FW_MAJOR         6
+#define FEE_ID_FW_MINOR         0
+#define FEE_MODEL_NUMBER        0xF200u   /* FT6's model number, little endian */
+
+/* ── extra chip-frame rotation for the FeeTech blocks ────────────────────
+   The FT6 host owns the mounting rotation: it applies `imu_mount_quat` from the
+   robot's calibration to whatever the node reports.  Our node reports chip
+   frame, so a board whose IMU chip sits in a different orientation than the
+   original FT6 node's chip needs this pre-rotation, otherwise the host's
+   (correct, robot-specific) calibration lands the attitude half a turn out.
+
+   It is a rotation *in the chip frame*, applied to the 12 control bytes of the
+   FeeTech blocks only: `q_out = q_chip * C`, `g_out = C g_chip C^-1`.
+
+   The default is this board's own fixed misalignment: the IMU chip sits rotated
+   180 degrees about its package normal compared with the original FT6 node's
+   chip (the marking dot ends up on the other side), which flips the in-plane
+   axes X and Y and leaves Z alone - C = [0, 0, 0, 1].  With it, an unmodified
+   robot (its calibration recorded for the original node) sees exactly the chip
+   frame it expects.  Override the four macros - or CMake's FEE_IMU_PREMOUNT -
+   for a different mounting; [1, 0, 0, 0] is the identity, i.e. publish the raw
+   chip frame.  See docs/imu_to_dxl_protocol.md §16.7. */
+#ifndef FEE_IMU_PREMOUNT_QW
+#define FEE_IMU_PREMOUNT_QW     0.0f
+#define FEE_IMU_PREMOUNT_QX     0.0f
+#define FEE_IMU_PREMOUNT_QY     0.0f
+#define FEE_IMU_PREMOUNT_QZ     1.0f
+#endif
+#else
+#define FEE_ID_FW_MAJOR         FW_VERSION_MAJOR
+#define FEE_ID_FW_MINOR         FW_VERSION_MINOR
+#define FEE_MODEL_NUMBER        0x4D49u   /* 'I','M' */
+#endif
+
 /* 0 = link at 0x08000000 (development board, no bootloader yet)
    1 = link at slot A, 2 = link at slot B (see linker/, docs/flash_layout.md) */
 #ifndef APP_SLOT
@@ -320,13 +399,15 @@
    off-the-shelf tools pick up the right unit conversions for the register
    layout the node mimics.  The IMU block itself is vendor-defined. */
 #define DXL_MODEL_NUMBER        1200
-/* FeeTech model number (HLS memory table 3..4, little endian).  Deliberately
-   NOT a servo model code: a real HD-1910 reports 0x1F0A, and FeeTech tooling
-   keys its behaviour off the model, so an unmistakable value ('I','M') says
-   "not a servo" instead of making a tool guess which frame layout this is.
+/* FeeTech model number (HLS memory table 3..4, little endian) - defined by
+   personality in the build-time block above.  native: deliberately NOT a servo
+   model code, because a real HD-1910 reports 0x1F0A and FeeTech tooling keys
+   its behaviour off the model, so an unmistakable value ('I','M') says "not a
+   servo" instead of making a tool guess which frame layout this is.  ft6:
+   0xF200, the value the FT6 node answers, because the R17 host reads the
+   identity window 0..6 as one fixed table and compares it byte for byte.
    The bootloader reports BOOT_FEE_MODEL_NUMBER instead, which is how a single
    PING tells "in the bootloader" from "running the application". */
-#define FEE_MODEL_NUMBER        0x4D49
 
 /* ── mounting ───────────────────────────────────────────────────────────── */
 
@@ -448,7 +529,22 @@
 /* Where the block lives in each register map */
 #define DXL_TELEM_ADDR          124  /* present_pwm .. position_trajectory */
 #define FEE_TELEM_ADDR          56   /* present_position .. present_current */
-#define FEE_TELEM_ALT_ADDR      128  /* clean vendor window */
+
+/* Where the FeeTech map keeps the *native* 20-byte block (accelerometer
+   included).  native personality: the 128 alias, outside the shared
+   `sync_read`.  ft6 personality: 196, because FT5/FT6 put their own 20-byte
+   diagnostic block at 124..143 and 128..147 would overlap it.  196..215 is
+   free and, being >= UID_WIN_ADDR, read-only through ro_high() - which is what
+   telemetry wants.  (The bootloader's 208..255 upgrade window lives in a
+   different image that never runs at the same time; docs/imu_to_dxl_protocol.md
+   §16 has the full map.) */
+#if FEE_IMU_PERSONALITY_FT6
+#define FEE_TELEM_NATIVE_ADDR   196
+#else
+#define FEE_TELEM_NATIVE_ADDR   128
+#endif
+/* legacy name for the same address, kept for existing hosts and tests */
+#define FEE_TELEM_ALT_ADDR      FEE_TELEM_NATIVE_ADDR
 
 /* The FeeTech map answers at 56 with the 15-byte shape a servo uses there, so
    the counter and status fit inside the span the runtime reads in the shared

@@ -18,6 +18,12 @@
 
     The first 12 bytes are the block microduck consumes every tick; the extra
     8 are the board's diagnostic tail (raw accelerometer, counter, flags).
+
+    Byte 18 is the *native* sample counter and byte 19 the native flags; in the
+    FT6 personality the contract block at 56..70 does not publish them - it
+    carries the quaternion sequence and the FT6 status byte instead (see
+    docs/imu_to_dxl_protocol.md §16).  They stay in the 20-byte block either
+    way, which is what the 124/20 diagnostic block and the 196 alias expose.
 */
 
 #ifndef IMU_H
@@ -57,5 +63,45 @@ const imu_sample_t *imu_latest(void);
 uint8_t  imu_flags(void);
 uint32_t imu_samples(void);
 int      imu_is_simulated(void);
+
+/* ── quaternion sequence: the FT6 contract's counter ──────────────────────
+   The FT6 node counts *new quaternion words*, not samples: its counter only
+   advances when the FIFO yields a fresh SFLP attitude.  The host reads that
+   byte as "the IMU is still producing data" and refuses the block after three
+   identical reads, so a counter that advances while the fusion has stalled is
+   worse than no counter at all - it retires the one signal that would have
+   caught it.  The facade owns the counting because both backends already know
+   when they produced a new attitude (see src/imu.c). */
+
+/*! \brief quaternion sequence: increments only when the backend produced a new
+           quaternion, and never when the attitude source has stopped. */
+uint32_t imu_quat_seq(void);
+
+/*! \brief millisecond tick of the sample that produced the current quaternion
+           sequence value, or 0 before the first one. */
+uint32_t imu_quat_ms(void);
+
+/*! \brief 1 when the current block carries a usable quaternion: the backend
+           says so and the six quaternion bytes are not all zero. */
+uint8_t  imu_quat_ready(void);
+
+/*! \brief milliseconds since the sample that produced the current quaternion
+           sequence value, saturated to 65535; 65535 when not ready.  O(1), and
+           safe to call from the USART interrupt. */
+uint16_t imu_quat_age_ms(void);
+
+#if FEE_IMU_PERSONALITY_FT6
+/*! \brief the 20-byte block as the *FeeTech* side should see it: the current
+           block with the personality's extra chip-frame rotation applied to the
+           twelve control bytes (see FEE_IMU_PREMOUNT_* in board.h), and the
+           diagnostic tail (accelerometer, counter, flags) copied unchanged.
+
+           Applied above the backends on purpose: the Dynamixel map and the 196
+           native alias must keep the raw chip frame, so the rotation belongs to
+           the FT6 FeeTech projection and not to the sensor sources.  An
+           all-zero quaternion stays all zero - "no attitude yet" must not be
+           turned into a fabricated one by rotating it. */
+void imu_fee_control_block(uint8_t out[TELEM_LEN]);
+#endif
 
 #endif /* IMU_H */
