@@ -14582,6 +14582,19 @@
 			(justify left bottom)
 		)
 	)
+	(gr_text "+"
+		(at 148.69 103.45 -0)
+		(layer "B.SilkS")
+		(uuid "8f241968-9d98-4dfc-9b5e-d5568d417b1a")
+		(effects
+			(font
+				(size 1.5 1.5)
+				(thickness 0.3)
+				(bold yes)
+			)
+			(justify left bottom mirror)
+		)
+	)
 	(segment
 		(start 137.74 100.2998)
 		(end 140.2 97.8398)
