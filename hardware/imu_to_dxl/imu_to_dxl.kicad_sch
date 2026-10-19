@@ -10670,6 +10670,110 @@
 		)
 	)
 	(symbol
+		(lib_name "RC0402FR-0710KL_1")
+		(lib_id "microduck:RC0402FR-0710KL")
+		(at 171.45 219.71 90)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "483e755b-f74c-4730-b597-5e3ea1126b1a")
+		(property "Reference" "R34"
+			(at 174.752 218.948 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "1K"
+			(at 174.244 221.488 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "microduck:R0402"
+			(at 171.45 219.71 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" ""
+			(at 171.45 219.71 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" ""
+			(at 171.45 219.71 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Manufacturer Part" ""
+			(at 171.45 219.71 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Manufacturer" ""
+			(at 171.45 219.71 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "LCSC Part" "C11702"
+			(at 171.45 219.71 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Supplier" "LCSC"
+			(at 171.45 219.71 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "67b552e5-96f8-4b67-aa52-75a1b66ddf72")
+		)
+		(pin "2"
+			(uuid "9e337a12-7435-47ef-ae55-70b6f356d4e2")
+		)
+		(instances
+			(project "imu_to_dxl"
+				(path "/9e76362d-8a32-4a28-948c-242ffcf8f16d"
+					(reference "R34")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "Device:R_Small")
 		(at 154.94 107.95 0)
 		(mirror x)
@@ -18255,7 +18359,7 @@
 				(justify right)
 			)
 		)
-		(property "Value" "27pF/50V"
+		(property "Value" "20pF/50V"
 			(at 294.64 240.0299 90)
 			(effects
 				(font
@@ -18309,7 +18413,7 @@
 				(hide yes)
 			)
 		)
-		(property "LCSC Part" "C107002"
+		(property "LCSC Part" "C107000"
 			(at 290.83 238.76 0)
 			(effects
 				(font
@@ -18892,7 +18996,7 @@
 				(hide yes)
 			)
 		)
-		(property "Supplier Part" "C51933293"
+		(property "LCSC Part" "C51933293"
 			(at 171.45 207.01 0)
 			(effects
 				(font
@@ -19473,113 +19577,6 @@
 			(project "imu_to_dxl"
 				(path "/9e76362d-8a32-4a28-948c-242ffcf8f16d"
 					(reference "R25")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_name "RC0402FR-0710KL_1")
-		(lib_id "microduck:RC0402FR-0710KL")
-		(at 171.45 219.71 270)
-		(unit 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "e76321bc-ff62-41de-a9fd-7b852c9cf6e5")
-		(property "Reference" "R34"
-			(at 173.99 218.4399 90)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "100K"
-			(at 173.99 220.9799 90)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "microduck:R0402"
-			(at 171.45 219.71 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Datasheet" ""
-			(at 171.45 219.71 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Description" ""
-			(at 171.45 219.71 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Manufacturer Part" ""
-			(at 171.45 219.71 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Manufacturer" ""
-			(at 171.45 219.71 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "LCSC Part" "C25741"
-			(at 171.45 219.71 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(property "Supplier" "LCSC"
-			(at 171.45 219.71 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(pin "1"
-			(uuid "28d79043-b547-4012-9702-e8c3fb4a6db7")
-		)
-		(pin "2"
-			(uuid "077e33dc-b3ce-43b3-a707-fe49bed011a9")
-		)
-		(instances
-			(project "imu_to_dxl"
-				(path "/9e76362d-8a32-4a28-948c-242ffcf8f16d"
-					(reference "R34")
 					(unit 1)
 				)
 			)
