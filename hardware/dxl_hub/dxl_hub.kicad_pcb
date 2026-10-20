@@ -205,7 +205,7 @@
 		(pad "1" thru_hole circle
 			(at 0 0 180)
 			(size 3 3)
-			(drill 1.6)
+			(drill 1.8)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net 2 "+BATT")
@@ -216,7 +216,7 @@
 		(pad "2" thru_hole circle
 			(at 0 4 180)
 			(size 3 3)
-			(drill 1.6)
+			(drill 1.8)
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net 1 "GND")
